@@ -58,6 +58,10 @@ jobs:
           opam install -y why3=1.7.2 alt-ergo
           echo "$HOME/.opam/default/bin" >> "$GITHUB_PATH"
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
       - name: Verify prover toolchain is visible
         run: |
           why3 --version
@@ -75,10 +79,9 @@ jobs:
             exit 1
           fi
 
-      - name: Prove
+      - name: Prove (5x limits, machine-int prelude)
         run: |
-          moon prove
-          # A proof-enabled package that cannot find Why3 is skipped silently,
-          # so require the goal count to be non-trivial.
-          moon prove 2>&1 | tee /tmp/prove.log
-          grep -q "goals proved" /tmp/prove.log
+          # A bare `moon prove` can time out on a loaded runner. The gate
+          # retries at ~5x limits and fails if a proof-enabled package is
+          # skipped silently or if the goal count is zero.
+          node scripts/prove_gate.mjs

@@ -2,7 +2,7 @@
 
 A formally verified MoonBit kernel for HTML escaping, filename sanitisation,
 URL rewriting and joined-list batch operations. Zero dependencies, four
-backends, 137 tests and 191 proof goals.
+backends, 137 tests and 419 proof goals under the 5x proof gate.
 
 ## Usage
 
@@ -18,7 +18,9 @@ its own output against the escape invariants before returning.
 
 ## Verification
 
-Run `moon test --target all` and `moon prove`. The proved kernels live in
+Run `moon test --target all` and `node scripts/prove_gate.mjs` (5x solver
+limits, 32-bit machine-integer model, 419 goals). A bare `moon prove`
+discharges 191 goals with the stock limits and may report timeouts. The proved kernels live in
 `src/proof` over UTF-16 code-unit arrays; `src/proof/conform.mbt` pins them to
 the shipped `String` API over an enumerated corpus. `src/lib` is not in the
 proof denominator because the prover has no `String` model — runtime invariant

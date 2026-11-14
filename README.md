@@ -10,7 +10,7 @@ set of routines for those four jobs, with the safety properties discharged by
 `moon prove` rather than by inspection.
 
 ```
-huanguan-Q/textkernel    137 tests × 4 backends    191 proof goals    zero deps
+huanguan-Q/textkernel    137 tests × 4 backends    419 proof goals (5x gate)    zero deps
 ```
 
 ## What is in the box
@@ -36,10 +36,17 @@ quietly emitting markup the caller believes is escaped.
 moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
 moon test --target all                    # 137/137 on each backend
-moon prove                               # 191 goals, 1/1 proof-enabled package
+moon prove                               # 191 goals with the stock solver limits
+node scripts/prove_gate.mjs              # 419 goals, 5x limits, machine-int model
 moon run src/demo --target native        # runnable example
 moon publish --dry-run                   # validate package metadata without releasing
 ```
+
+Two proof counts appear above because they answer different questions: the
+stock `moon prove` run discharges 191 goals, while `scripts/prove_gate.mjs`
+retries at ~5x solver limits under the 32-bit machine-integer prelude and
+discharges 419. The gate is what CI uses; a bare `moon prove` can report a
+handful of timeouts on a loaded machine.
 
 Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
 z3. The proof verdicts depend on the VC generator, so pin the toolchain when
