@@ -1,0 +1,12 @@
+# MoonBit build output and local caches
+_build/
+target/
+.mooncakes/
+*.generated.mbti
+*.coverage
+bisect.coverage
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
