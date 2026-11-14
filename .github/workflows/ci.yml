@@ -1,0 +1,84 @@
+name: textkernel CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  MOON_VERSION: "0.1.20261104"
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install MoonBit (pinned)
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.moon/bin:$PATH"
+          moon version --all
+          got=$(moon version | head -1 | awk '{print $2}')
+          if [ "$got" != "$MOON_VERSION" ]; then
+            echo "::error::moon is '$got' but this workflow pins '$MOON_VERSION'."
+            exit 1
+          fi
+
+      - name: Format
+        run: moon fmt --check
+
+      - name: Check (all backends, warnings are errors)
+        run: moon check --target all --deny-warn
+
+      - name: Test (all backends)
+        run: moon test --target all
+
+      - name: Runnable example
+        run: moon run src/demo --target native
+
+      - name: Validate package metadata
+        run: moon publish --dry-run
+
+  proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install z3, opam and Why3
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y z3 opam
+          opam init --disable-sandboxing --bare -y
+          opam switch create default --packages=ocaml-system -y || opam switch default
+          eval "$(opam env)"
+          opam install -y why3=1.7.2 alt-ergo
+          echo "$HOME/.opam/default/bin" >> "$GITHUB_PATH"
+
+      - name: Verify prover toolchain is visible
+        run: |
+          why3 --version
+          z3 --version
+          alt-ergo --version
+
+      - name: Install MoonBit (pinned)
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.moon/bin:$PATH"
+          got=$(moon version | head -1 | awk '{print $2}')
+          if [ "$got" != "$MOON_VERSION" ]; then
+            echo "::error::moon is '$got' but this workflow pins '$MOON_VERSION'."
+            exit 1
+          fi
+
+      - name: Prove
+        run: |
+          moon prove
+          # A proof-enabled package that cannot find Why3 is skipped silently,
+          # so require the goal count to be non-trivial.
+          moon prove 2>&1 | tee /tmp/prove.log
+          grep -q "goals proved" /tmp/prove.log
