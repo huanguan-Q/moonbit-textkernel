@@ -1,0 +1,35 @@
+// Logic side for the substring kernels in `contains.mbt`.
+//
+// `@lib.str_contains` is the gate that decides whether a URL belongs to a asset
+// asset host, so both `normalize_asset_url` and `decide_referrer_policy` inherit its
+// answer. It is also the only shipped routine with hand-written search
+// optimisations — a single-unit fast path, and a last-character probe that jumps
+// straight into a full comparison — which is exactly the shape where an
+// off-by-one hides. The two predicates below give that behaviour a name.
+
+/// `needle` matches `hay` starting at `s`, code unit for code unit.
+///
+/// This is the model of one comparison, not of the search: it says nothing about
+/// whether such an `s` exists, and it reads `hay[s .. s + needle.length())` — so
+/// callers must keep `s + needle.length() <= hay.length()` in scope.
+predicate match_at(hay : FixedArray[Int], needle : FixedArray[Int], s : Int) {
+  ∀ j : Int, ((0 <= j) && (j < needle.length())) → hay[s + j] == needle[j]
+}
+
+/// `needle` occurs in `hay` at some position.
+///
+/// The bound `s + needle.length() <= hay.length()` is part of the claim rather
+/// than an afterthought: without it a match could be witnessed by reading past
+/// the end, which is precisely the failure a lenient bounds check would hide.
+///
+/// Two degenerate cases fall out of the definition instead of being special-cased
+/// in the model, which is why the kernel's early answers are consequences rather
+/// than axioms:
+///
+/// * an empty `needle` occurs at `s = 0` whatever `hay` is;
+/// * a `needle` longer than `hay` admits no `s >= 0` at all.
+predicate contains_somewhere(hay : FixedArray[Int], needle : FixedArray[Int]) {
+  (needle.length() <= hay.length()) &&
+  (∃ s : Int,
+    ((0 <= s) && (s <= hay.length() - needle.length())) && match_at(hay, needle, s))
+}

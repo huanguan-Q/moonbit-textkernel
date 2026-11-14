@@ -1,0 +1,340 @@
+// Logic side: predicates and logic functions that only the prover sees.
+// No executable code, no type declarations, no `#proof_pure` here.
+//
+// Every numeric constant is imported from `codes.mbt`, so the specification and
+// the kernel cannot disagree about what `&` or `<` is.
+
+/// True when `c` is one of the nine characters `sanitize_filename` rewrites:
+/// `/ \ : * ? " < > |`
+fn is_illegal_name_char(c : Int) -> Bool {
+  (c == CH_SLASH) ||
+  (c == CH_BACKSLASH) ||
+  (c == CH_COLON) ||
+  (c == CH_STAR) ||
+  (c == CH_QUESTION) ||
+  (c == CH_DQUOTE) ||
+  (c == CH_LT) ||
+  (c == CH_GT) ||
+  (c == CH_PIPE)
+}
+
+/// True when `c` is an unpaired UTF-16 surrogate code unit.
+///
+/// `String::at` yields one code unit at a time, so a well-formed surrogate
+/// *pair* shows up as two separate lone halves here. Both are replaced, which
+/// is what the runtime `UInt16::to_char()` returning `None` does.
+fn is_lone_surrogate(c : Int) -> Bool {
+  (SURROGATE_LO <= c) && (c <= SURROGATE_HI)
+}
+
+/// True when `sanitize_filename` must emit `_` instead of the input code unit.
+fn replaced_in_name(c : Int) -> Bool {
+  is_illegal_name_char(c) || is_lone_surrogate(c)
+}
+
+/// Exact per-position contract of the filename sanitizer.
+fn sanitize_at(c : Int, out : Int) -> Bool {
+  if replaced_in_name(c) {
+    out == CH_UNDERSCORE
+  } else {
+    out == c
+  }
+}
+
+/// `min(n, cap)`, spelled out so specs never depend on an external helper.
+fn clamped_len(n : Int, cap : Int) -> Int {
+  if n < cap {
+    n
+  } else {
+    cap
+  }
+}
+
+/// `dst[0 .. n)` is exactly the sanitized image of `src[0 .. n)`.
+predicate sanitized_prefix(src : FixedArray[Int], dst : FixedArray[Int], n : Int) {
+  (0 <= n) &&
+  (∀ i : Int, ((0 <= i) && (i < n)) → sanitize_at(src[i], dst[i]))
+}
+
+/// `dst[0 .. w)` contains no `<` and no `>`.
+///
+/// This is the property that stops `escape_html` / `escape_attr` output from
+/// opening or closing a tag when it is spliced into an HTML document.
+predicate no_markup_prefix(dst : FixedArray[Int], w : Int) {
+  ∀ i : Int, ((0 <= i) && (i < w)) → (dst[i] != CH_LT) && (dst[i] != CH_GT)
+}
+
+/// `dst[0 .. w)` contains no `"` and no `'`.
+///
+/// This is the property that stops attribute-context escaping from terminating
+/// a quoted attribute early.
+predicate no_quote_prefix(dst : FixedArray[Int], w : Int) {
+  ∀ i : Int, ((0 <= i) && (i < w)) → (dst[i] != CH_DQUOTE) &&
+    (dst[i] != CH_SQUOTE)
+}
+
+/// `src` starts with the ASCII prefix `http://`.
+predicate has_http_scheme(src : FixedArray[Int]) {
+  (src.length() >= 7) &&
+  (src[0] == CH_LOWER_H) &&
+  (src[1] == CH_LOWER_T) &&
+  (src[2] == CH_LOWER_T) &&
+  (src[3] == CH_LOWER_P) &&
+  (src[4] == CH_COLON) &&
+  (src[5] == CH_SLASH) &&
+  (src[6] == CH_SLASH)
+}
+
+/// Full functional characterisation of the `http://` -> `https://` rewrite:
+/// the eight-unit `https://` header followed by the input tail, unshifted by
+/// exactly one position.
+///
+/// The last conjunct is the point of the whole exercise: it says the tail is
+/// copied verbatim, which is precisely what the historical
+/// `processed[i].to_string()` bug violated (it turned every tail code unit into
+/// its decimal spelling).
+predicate https_rewrite_ok(src : FixedArray[Int], dst : FixedArray[Int]) {
+  has_http_scheme(src) &&
+  (dst.length() == src.length() + 1) &&
+  (dst[0] == CH_LOWER_H) &&
+  (dst[1] == CH_LOWER_T) &&
+  (dst[2] == CH_LOWER_T) &&
+  (dst[3] == CH_LOWER_P) &&
+  (dst[4] == CH_LOWER_S) &&
+  (dst[5] == CH_COLON) &&
+  (dst[6] == CH_SLASH) &&
+  (dst[7] == CH_SLASH) &&
+  (∀ k : Int, ((7 <= k) && (k < src.length())) → dst[k + 1] == src[k])
+}
+
+/// The input is returned unchanged, code unit for code unit.
+predicate unchanged_ok(src : FixedArray[Int], dst : FixedArray[Int]) {
+  (dst.length() == src.length()) &&
+  (∀ k : Int, ((0 <= k) && (k < src.length())) → dst[k] == src[k])
+}
+
+/// Case split of the rewrite: rewrote the scheme, or copied the input through.
+fn rewrite_ok(src : FixedArray[Int], dst : FixedArray[Int]) -> Bool {
+  if has_http_scheme(src) {
+    https_rewrite_ok(src, dst)
+  } else {
+    unchanged_ok(src, dst)
+  }
+}
+
+/// The `i`-th code unit of the `"file"` fallback: `f`, `i`, `l`, `e`.
+fn default_code(i : Int) -> Int {
+  if i == 0 {
+    102
+  } else {
+    if i == 1 {
+      105
+    } else {
+      if i == 2 {
+        108
+      } else {
+        101
+      }
+    }
+  }
+}
+
+/// The `i`-th code unit of the `https://` header, for `i` in `[0, 8)`:
+/// `h`, `t`, `t`, `p`, `s`, `:`, `/`, `/`.
+///
+/// `i == 6` and `i == 7` share the trailing `47`, so the chain ends there.
+fn https_code(i : Int) -> Int {
+  if i == 0 {
+    104
+  } else {
+    if i == 1 {
+      116
+    } else {
+      if i == 2 {
+        116
+      } else {
+        if i == 3 {
+          112
+        } else {
+          if i == 4 {
+            115
+          } else {
+            if i == 5 {
+              58
+            } else {
+              47
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/// True when the `&` at `dst[i]` (with `i < w`) starts one of the five entities
+/// this project can emit, and that entity is fully inside `[0, w)`.
+///
+/// The bounds conjunct matters: an entity split across the write cursor would be
+/// invisible to a naive "starts with &amp;" test.
+///
+/// The five alternatives are expressed as an `if`/`else` chain rather than a
+/// `||` chain, and that is deliberate. The logic-side parser rejects a
+/// parenthesised `&&` conjunction when it is an operand of `||`:
+///
+///     ((a) && (b)) || ((c) && (d))   -> [3002] unexpected `&&` here
+///     (a && b) || (c && d)           -> [3002] unexpected `&&` here
+///     (a) && (b) || (c) && (d)       -> accepted
+///     a && b || c && d               -> accepted
+///
+/// So the only way to spell five disjuncts of conjunctions is to leave the
+/// conjunctions unparenthesised and let `&&` bind tighter than `||`. That makes
+/// the meaning of the formula depend on operator precedence, with nothing in the
+/// toolchain pinning it: no lint, no test, and the explicit form cannot even be
+/// written down as a cross-check.
+///
+/// Control flow removes the question. A chain of `if c_i { true }` branches is
+/// `c1 || c2 || ...` by construction, each `c_i` is a flat `&&` conjunction (no
+/// `||` involved, so no precedence to rely on), and the meaning no longer hinges
+/// on how the two operators rank.
+///
+/// The chain is written as nested `else { if ... }` blocks rather than
+/// `else if`, because the logic side rejects the latter too (`unexpected if
+/// here`); `default_code` and `https_code` above use the same shape for the same
+/// reason.
+fn entity_at(dst : FixedArray[Int], w : Int, i : Int) -> Bool {
+  if ((i + 5) <= w) && (dst[i + 1] == CH_LOWER_A) && (dst[i + 2] == CH_LOWER_M) && (dst[i + 3] == CH_LOWER_P) && (dst[i + 4] == CH_SEMI) {
+    true
+  } else {
+    if ((i + 4) <= w) && (dst[i + 1] == CH_LOWER_L) && (dst[i + 2] == CH_LOWER_T) && (dst[i + 3] == CH_SEMI) {
+      true
+    } else {
+      if ((i + 4) <= w) && (dst[i + 1] == CH_LOWER_G) && (dst[i + 2] == CH_LOWER_T) && (dst[i + 3] == CH_SEMI) {
+        true
+      } else {
+        if ((i + 6) <= w) && (dst[i + 1] == 113) && (dst[i + 2] == 117) && (dst[i + 3] == 111) && (dst[i + 4] == CH_LOWER_T) && (dst[i + 5] == CH_SEMI) {
+          true
+        } else {
+          ((i + 5) <= w) && (dst[i + 1] == 35) && (dst[i + 2] == 51) && (dst[i + 3] == 57) && (dst[i + 4] == CH_SEMI)
+        }
+      }
+    }
+  }
+}
+
+/// Every `&` inside `dst[0 .. w)` belongs to a complete, recognised entity.
+///
+/// This is what rules out an escaper that emits `&xmp;` (no raw metacharacter in
+/// sight, yet the browser decodes it as something else): the ampersand has to
+/// introduce one of the five entities this project is allowed to produce.
+///
+/// Known expensive, and deliberately left alone. Preservation across the
+/// escapers' loops (`escape.mbt` writes five units and bumps `w` in one
+/// iteration) is a quantified statement over an array that was just mutated:
+/// every `&` already in the prefix must be shown to still start an entity whose
+/// extent ends at or before the old cursor, which calls for a case split per
+/// index. `moon prove` reports these as `slow_goals` — 18 of them — and they are
+/// closed by the `split_vc` stage after Alt-Ergo times out. At the stock time
+/// limits the package fails (measured: 417 goals proved, 5 timeout); the gate in
+/// `scripts/prove_gate.mjs` proves at 5x limits, which is why it exists.
+///
+/// A transport lemma (`entity_at` preserved across an in-place update, given a
+/// frame condition on the six readable units) was tried and measured: it adds
+/// its own proof obligation and leaves the count at 20 slow goals with an
+/// identical distribution. The cost is in the shape of the quantified array
+/// reasoning, not in a missing intermediate step, so do not re-attempt the lemma.
+/// If this ever needs to be faster, the change has to be to the reasoning
+/// strategy (or to `entity_at`'s representation), not to the spec's lemmas.
+predicate entities_ok_prefix(dst : FixedArray[Int], w : Int) {
+  ∀ i : Int, ((0 <= i) && (i < w) && (dst[i] == CH_AMP)) → entity_at(dst, w, i)
+}
+
+/// Width of the HTML escape of one code unit: 5 for `&amp;`, 4 for `&lt;` /
+/// `&gt;`, 1 for everything else.
+fn html_width(c : Int) -> Int {
+  if c == CH_AMP {
+    5
+  } else {
+    if c == CH_LT {
+      4
+    } else {
+      if c == CH_GT {
+        4
+      } else {
+        1
+      }
+    }
+  }
+}
+
+/// `dst[k .. k + html_width(c))` holds exactly the HTML escape of `c`.
+///
+/// This is the functional counterpart of `no_markup_prefix`. That predicate only
+/// says the output contains no `<` or `>`; this one says which bytes must be
+/// there. An escaper that emitted `_` for every unit satisfies the former and
+/// violates the latter, which is why the kernels assert this per unit.
+///
+/// Note the disjunction is over the *input* character, so the case split is
+/// driven by `c`, not by `dst`: the prover only ever has to match one branch.
+predicate html_at(dst : FixedArray[Int], k : Int, c : Int) {
+  ((c == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
+  ((c == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((c == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (SURROGATE_LO <= c) && (c <= SURROGATE_HI) && (dst[k] == CH_UNDERSCORE)) ||
+  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && ((c < SURROGATE_LO) || (SURROGATE_HI < c)) && (dst[k] == c))
+}
+
+/// Width of the attribute-context escape of one code unit.
+fn attr_width(c : Int) -> Int {
+  if c == CH_AMP {
+    5
+  } else {
+    if c == CH_LT {
+      4
+    } else {
+      if c == CH_GT {
+        4
+      } else {
+        if c == CH_DQUOTE {
+          6
+        } else {
+          if c == CH_SQUOTE {
+            5
+          } else {
+            1
+          }
+        }
+      }
+    }
+  }
+}
+
+/// `dst[k .. k + attr_width(c))` holds exactly the attribute-context escape of
+/// `c`.
+predicate attr_at(dst : FixedArray[Int], k : Int, c : Int) {
+  ((c == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
+  ((c == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((c == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((c == CH_DQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 113) && (dst[k + 2] == 117) && (dst[k + 3] == 111) && (dst[k + 4] == CH_LOWER_T) && (dst[k + 5] == CH_SEMI)) ||
+  ((c == CH_SQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 35) && (dst[k + 2] == 51) && (dst[k + 3] == 57) && (dst[k + 4] == CH_SEMI)) ||
+  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (c != CH_DQUOTE) && (c != CH_SQUOTE) && (SURROGATE_LO <= c) && (c <= SURROGATE_HI) && (dst[k] == CH_UNDERSCORE)) ||
+  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (c != CH_DQUOTE) && (c != CH_SQUOTE) && ((c < SURROGATE_LO) || (SURROGATE_HI < c)) && (dst[k] == c))
+}
+
+/// The exact value `safe_batch_size` must return, as a two-branch fact.
+///
+/// `result > 0` alone is too weak to be useful: it also admits `42` for a
+/// non-positive request, so the guard's *value* would rest on the runtime grid
+/// test instead of on the proof. Splitting by the sign of `requested` pins both
+/// branches without naming a conditional expression.
+predicate safe_batch_post(requested : Int, r : Int) {
+  ((requested <= 0) && (r == 1)) || ((0 < requested) && (r == requested))
+}
+
+/// The exact value `batch_end` must return: `min(start + bs, n)`.
+///
+/// Written as two branches over `start + bs < n` so that no `min` function is
+/// needed in the logic. `start <= result <= n` on its own would also admit the
+/// constant `n`, which returns an empty slice for every batch but the last.
+predicate batch_end_post(start : Int, bs : Int, n : Int, r : Int) {
+  ((start + bs < n) && (r == start + bs)) || ((n <= start + bs) && (r == n))
+}

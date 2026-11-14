@@ -1,0 +1,5 @@
+import {
+  "huanguan-Q/textkernel/src/lib",
+}
+
+proof_enabled = true
