@@ -1,0 +1,103 @@
+# textkernel
+
+**A small, formally verified MoonBit kernel for text that crosses a trust boundary.**
+
+When a program takes a string from one system and puts it into another — into
+HTML, into a filename, into a URL, into a batch API — four things can go wrong:
+markup can be injected, a filename can escape its directory, a URL can be
+rewritten incorrectly, and a batch loop can drop an item. `textkernel` is the
+set of routines for those four jobs, with the safety properties discharged by
+`moon prove` rather than by inspection.
+
+```
+huanguan-Q/textkernel    137 tests × 4 backends    191 proof goals    zero deps
+```
+
+## What is in the box
+
+| Routine | What it guarantees |
+|---|---|
+| `escape_html` / `escape_attr` | Output contains no raw `<` `>` (nor `"` `'` for attributes); every `&` starts a complete entity the library emits |
+| `sanitize_filename` | Replaces the nine unsafe characters and lone surrogates, clamps to 120 code units, never returns empty |
+| `normalize_asset_url` | Forces `https` for configured hosts and appends missing default query params; the tail is carried over verbatim |
+| `decide_referrer_policy` | Picks a Referrer-Policy from a configured host allow-list |
+| `str_contains` | UTF-16 code-unit substring test (the host gate above) |
+| `split_joined` / `join_joined` | Exact inverse pair for batch calls; slices by code unit so non-BMP characters survive |
+| `batch_process_custom` | Applies an operation in bounded chunks; a non-positive chunk size is clamped to 1, never divided by |
+
+`*_result` variants return `Result[T, CoreError]` with an explicit input bound.
+The shipping layer also checks its own output against the invariants before
+returning and aborts on violation — a regression fails loudly instead of
+quietly emitting markup the caller believes is escaped.
+
+## Reproduce
+
+```bash
+moon fmt --check
+moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
+moon test --target all                    # 137/137 on each backend
+moon prove                               # 191 goals, 1/1 proof-enabled package
+moon run src/demo --target native        # runnable example
+moon publish --dry-run                   # validate package metadata without releasing
+```
+
+Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
+z3. The proof verdicts depend on the VC generator, so pin the toolchain when
+reproducing; `.github/workflows/ci.yml` asserts the version.
+
+## Use
+
+```moonbit
+let safe = @lib.escape_html("<script>alert(1)</script>")
+// &lt;script&gt;alert(1)&lt;/script&gt;
+
+let name = @lib.sanitize_filename("report/2026:Q4?.md")
+// report_2026_Q4_.md
+
+let items = @lib.split_joined("a|b|c", "|")
+let out = @lib.join_joined(@lib.quick_batch_escape_htmls(items), "|")
+```
+
+See `src/demo/main.mbt` for a complete runnable example.
+
+## Boundaries — read this before relying on it
+
+- **The prover has no model for `String`.** The proved kernels in `src/proof`
+  operate on `FixedArray[Int32]` UTF-16 code units. `src/proof/conform.mbt`
+  pins each kernel to the shipped `String` implementation over an enumerated
+  corpus. That two-line conversion is the trusted seam; it is a corpus
+  equivalence, not a theorem about `String`.
+- **Only `src/proof` is proof-enabled.** `src/lib` and `src/demo` are not in
+  the `moon prove` denominator — `proof_enabled` is a whole-package switch and
+  the `String`/`Array` usage in `src/lib` is outside the current model. The
+  runtime invariant checks in `src/lib/invariants.mbt` are what close that gap.
+- **Input bounds are arithmetic, not resource limits.** `MAX_INPUT_CODE_UNITS`
+  keeps the kernels' `5 * length` / `6 * length` inside 32 bits;
+  `MAX_SHIPPING_CODE_UNITS` (8,000,000 code units) is the tighter bound the
+  shipping layer enforces. Both are documented in `invariants.mbt`.
+- **`batch.mbt` proves the arithmetic**, not scheduling, concurrency or
+  timing. `BatchConfig.max_concurrent` / `timeout_ms` are configuration
+  fields, not enforced behaviour.
+- The host allow-list and default query params are **constants in `core.mbt`**,
+  deliberately set to reserved example domains (`cdn.example.com`,
+  `assets.example.org`, RFC 2606). This is a general-purpose library; it has no
+  knowledge of, and no integration with, any specific content platform.
+
+## Provenance & License
+
+All code here is an independent implementation. It was extracted from a larger
+private codebase by the same author and generalised for this repository:
+platform-specific host names and query parameters were replaced with reserved
+example domains, and two layers were rewritten from scratch to remove
+scaffolding dependencies —
+
+- `src/lib/validation.mbt`: rewritten without the original logging side effects.
+- `src/lib/batching.mbt`: rewritten without the original content-analysis and
+  wall-clock modules; the arithmetic it uses is the exact expression discharged
+  by `src/proof/batch.mbt`.
+
+No third-party source code is included. No code was translated or ported from
+another project. The proof obligations, specifications and test corpora are
+original work.
+
+Licensed under **MIT** — see `LICENSE`.
