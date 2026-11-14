@@ -1,0 +1,5 @@
+import {
+  "huanguan-Q/textkernel/src/lib",
+}
+
+pkgtype(kind: "executable")
