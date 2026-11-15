@@ -1,10 +1,10 @@
 // Verified arithmetic behind the batch pipeline.
 //
-// `@lib`'s `batch_processing.mbt` sizes its batches with
+// `@lib`'s `batching.mbt` sizes its batches with
 // `(items.length() + batch_size - 1) / batch_size` and slices each batch with
-// `min(start + batch_size, items.length())`. Those two expressions are where the
-// module's integer bugs lived — three of them divided by a user-supplied
-// `batch_size` / `max_concurrent` that could be zero.
+// `min(start + batch_size, items.length())`. Those two expressions are where
+// the original module's integer bugs lived: the divisor was a user-supplied
+// `batch_size` that could be zero. `safe_batch_size` clamps it to 1.
 //
 // The kernels below are the exact expressions, with the arithmetic obligations
 // discharged by the prover instead of by inspection.
