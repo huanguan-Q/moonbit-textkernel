@@ -15,6 +15,20 @@ assert.equal(k.decide_referrer_policy("https://elsewhere.example/a.png"), "no-re
 assert.equal(k.str_contains("abc", "b"), "true");
 assert.equal(k.str_contains("abc", "z"), "false");
 
+// Never-fail variants agree with the fail-fast API on valid input.
+for (const s of ["", "abc", "<a & b>", "中文😀"]) {
+  assert.equal(k.escape_html_safe(s), k.escape_html(s));
+  assert.equal(k.escape_attr_safe(s), k.escape_attr(s));
+  assert.equal(k.sanitize_filename_safe(s), k.sanitize_filename(s));
+}
+
+// Never-fail variants agree with the fail-fast API on valid input.
+for (const s of ["", "abc", "<a & b>", "中文😀"]) {
+  assert.equal(k.escape_html_safe(s), k.escape_html(s));
+  assert.equal(k.escape_attr_safe(s), k.escape_attr(s));
+  assert.equal(k.sanitize_filename_safe(s), k.sanitize_filename(s));
+}
+
 const sep = "|";
 assert.equal(k.escape_htmls_joined("<a>|<b>&", sep), "&lt;a&gt;|&lt;b&gt;&amp;");
 assert.equal(k.escape_attrs_joined("a\"|b'", sep), "a&quot;|b&#39;");
@@ -24,7 +38,7 @@ assert.equal(
   "https://cdn.example.com/a.png?fmt=png&v=1|https://example.org/b.png",
 );
 
-console.log("textkernel WASM example: 11 assertions passed");
+console.log("textkernel WASM example: all assertions passed");
 console.log("escape_html  :", k.escape_html("<script>a & b</script>"));
 console.log("escape_attr  :", k.escape_attr("x\" onload='y'"));
 console.log("sanitise     :", k.sanitize_filename("report/2026:Q4?.md"));
