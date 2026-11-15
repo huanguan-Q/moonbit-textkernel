@@ -29,7 +29,8 @@ const bytes = readFileSync(SRC);
 const ex = WebAssembly.Module.exports(new WebAssembly.Module(bytes)).map((e) => e.name);
 const expected = [
   "escape_html", "escape_attr", "sanitize_filename", "normalize_asset_url",
-  "decide_referrer_policy", "str_contains", "escape_htmls_joined",
+  "decide_referrer_policy", "str_contains", "escape_html_safe",
+  "escape_attr_safe", "sanitize_filename_safe", "escape_htmls_joined",
   "escape_attrs_joined", "sanitize_filenames_joined", "normalize_asset_urls_joined",
 ];
 const missing = expected.filter((n) => !ex.includes(n));

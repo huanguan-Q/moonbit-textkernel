@@ -91,3 +91,20 @@ pub fn normalize_asset_urls_joined(joined : String, sep : String) -> String {
 fn main {
 
 }
+
+///|
+/// Never-fail variants. These use the `EmptyOnError` policy, so an oversized
+/// input or an invariant violation returns `""` instead of trapping the host.
+pub fn escape_html_safe(input : String) -> String {
+  @lib.escape_html_safe(input)
+}
+
+///|
+pub fn escape_attr_safe(input : String) -> String {
+  @lib.escape_attr_safe(input)
+}
+
+///|
+pub fn sanitize_filename_safe(name : String) -> String {
+  @lib.sanitize_filename_safe(name)
+}
