@@ -131,7 +131,7 @@ pub fn decide_referrer_policy(input : String) -> String {
 ///|
 /// Sanitize a filename by replacing invalid characters with '_' and clamping length to 120 code units.
 /// If input is empty, defaults to "file". Optimized version maintaining original behavior.
-pub fn sanitize_filename(name : String) -> String {
+fn sanitize_filename_build(name : String) -> String {
   require_model_length(name, "sanitize_filename")
   let base = if name.length() == 0 { "file" } else { name }
 
@@ -167,12 +167,47 @@ pub fn sanitize_filename(name : String) -> String {
       }
     }
   }
-  let result = out.to_string()
-  // SEC-S1 mirror: `sanitized_prefix` is proved for `sanitize_codes` only.
-  if !filename_is_sanitized(result) {
-    abort("sanitize_filename: output violates the filename invariant")
+  out.to_string()
+}
+
+///|
+/// Checked form of `sanitize_filename`. Never aborts: domain violations and invariant
+/// failures both come back as `Err`. This is the recommended production API.
+fn sanitize_filename_checked_impl(name : String) -> Result[String, CoreError] {
+  match check_model_length(name, "sanitize_filename") {
+    Err(e) => return Err(e)
+    Ok(_) => ()
   }
-  result
+  let result = sanitize_filename_build(name)
+  if !filename_is_sanitized(result) {
+    Err(
+      InvariantViolation(
+        "sanitize_filename: output violates the filename invariant",
+      ),
+    )
+  } else {
+    Ok(result)
+  }
+}
+
+///|
+/// String-returning form with an explicit failure policy.
+pub fn sanitize_filename_with_policy(
+  name : String,
+  policy : FailurePolicy,
+) -> String {
+  match sanitize_filename_checked_impl(name) {
+    Ok(result) => result
+    Err(e) => apply_failure_policy(e, policy)
+  }
+}
+
+///|
+/// Fail-fast compatibility layer. Signature is unchanged for existing callers
+/// and for the WASM exports; new code should use `sanitize_filename_result` or
+/// `sanitize_filename_with_policy`.
+pub fn sanitize_filename(name : String) -> String {
+  sanitize_filename_with_policy(name, FailFast)
 }
 
 ///|
@@ -193,7 +228,7 @@ fn is_invalid_filename_char(code : UInt16) -> Bool {
 ///|
 /// Escape HTML text content by replacing '&', '<', '>' with their entities.
 /// Non-ASCII code units are preserved when decodable as Char; undecodable units become '_'.
-pub fn escape_html(input : String) -> String {
+fn escape_html_build(input : String) -> String {
   require_model_length(input, "escape_html")
   // Amortised O(n): see the note in `sanitize_filename`.
   let out = StringBuilder(size_hint=input.length())
@@ -226,20 +261,49 @@ pub fn escape_html(input : String) -> String {
       }
     }
   }
-  let result = out.to_string()
-  // SEC-S1 mirror: `no_markup_prefix` / `entities_ok_prefix` are proved for
-  // `escape_html_codes`, not for this function. Check the result before handing
-  // it back, so a regression here cannot quietly produce markup.
-  if !html_is_escaped(result) {
-    abort("escape_html: output violates the escape invariant")
+  out.to_string()
+}
+
+///|
+/// Checked form of `escape_html`. Never aborts: domain violations and invariant
+/// failures both come back as `Err`. This is the recommended production API.
+fn escape_html_checked_impl(input : String) -> Result[String, CoreError] {
+  match check_model_length(input, "escape_html") {
+    Err(e) => return Err(e)
+    Ok(_) => ()
   }
-  result
+  let result = escape_html_build(input)
+  if !html_is_escaped(result) {
+    Err(InvariantViolation("escape_html: output violates the escape invariant"))
+  } else {
+    Ok(result)
+  }
+}
+
+///|
+/// String-returning form with an explicit failure policy.
+pub fn escape_html_with_policy(
+  input : String,
+  policy : FailurePolicy,
+) -> String {
+  match escape_html_checked_impl(input) {
+    Ok(result) => result
+    Err(e) => apply_failure_policy(e, policy)
+  }
+}
+
+///|
+/// Fail-fast compatibility layer. Signature is unchanged for existing callers
+/// and for the WASM exports; new code should use `escape_html_result` or
+/// `escape_html_with_policy`.
+pub fn escape_html(input : String) -> String {
+  escape_html_with_policy(input, FailFast)
 }
 
 ///|
 /// Escape HTML attribute content. In addition to text escaping, also escape '"' and '\''.
 /// Mappings: '&' -> &amp;, '<' -> &lt;, '>' -> &gt;, '"' -> &quot;, '\'' -> &#39;
-pub fn escape_attr(input : String) -> String {
+fn escape_attr_build(input : String) -> String {
   require_model_length(input, "escape_attr")
   // Amortised O(n): see the note in `sanitize_filename`.
   let out = StringBuilder(size_hint=input.length())
@@ -282,12 +346,47 @@ pub fn escape_attr(input : String) -> String {
       }
     }
   }
-  let result = out.to_string()
-  // SEC-S1 mirror: `no_quote_prefix` is proved for `escape_attr_codes` only.
-  if !attr_is_escaped(result) {
-    abort("escape_attr: output violates the attribute-escape invariant")
+  out.to_string()
+}
+
+///|
+/// Checked form of `escape_attr`. Never aborts: domain violations and invariant
+/// failures both come back as `Err`. This is the recommended production API.
+fn escape_attr_checked_impl(input : String) -> Result[String, CoreError] {
+  match check_model_length(input, "escape_attr") {
+    Err(e) => return Err(e)
+    Ok(_) => ()
   }
-  result
+  let result = escape_attr_build(input)
+  if !attr_is_escaped(result) {
+    Err(
+      InvariantViolation(
+        "escape_attr: output violates the attribute-escape invariant",
+      ),
+    )
+  } else {
+    Ok(result)
+  }
+}
+
+///|
+/// String-returning form with an explicit failure policy.
+pub fn escape_attr_with_policy(
+  input : String,
+  policy : FailurePolicy,
+) -> String {
+  match escape_attr_checked_impl(input) {
+    Ok(result) => result
+    Err(e) => apply_failure_policy(e, policy)
+  }
+}
+
+///|
+/// Fail-fast compatibility layer. Signature is unchanged for existing callers
+/// and for the WASM exports; new code should use `escape_attr_result` or
+/// `escape_attr_with_policy`.
+pub fn escape_attr(input : String) -> String {
+  escape_attr_with_policy(input, FailFast)
 }
 
 ///|
@@ -327,7 +426,7 @@ pub fn decide_referrer_policy_result(
 pub fn sanitize_filename_result(name : String) -> Result[String, CoreError] {
   let max_len : Int32 = 4096
   match validate_string_input("sanitize_filename_result", name, max_len) {
-    Ok(_) => Ok(sanitize_filename(name))
+    Ok(_) => sanitize_filename_checked_impl(name)
     Err(e) => Err(e)
   }
 }
@@ -338,7 +437,7 @@ pub fn sanitize_filename_result(name : String) -> Result[String, CoreError] {
 pub fn escape_html_result(input : String) -> Result[String, CoreError] {
   let max_len : Int32 = 8192
   match validate_string_input("escape_html_result", input, max_len) {
-    Ok(_) => Ok(escape_html(input))
+    Ok(_) => escape_html_checked_impl(input)
     Err(e) => Err(e)
   }
 }
@@ -349,7 +448,7 @@ pub fn escape_html_result(input : String) -> Result[String, CoreError] {
 pub fn escape_attr_result(input : String) -> Result[String, CoreError] {
   let max_len : Int32 = 8192
   match validate_string_input("escape_attr_result", input, max_len) {
-    Ok(_) => Ok(escape_attr(input))
+    Ok(_) => escape_attr_checked_impl(input)
     Err(e) => Err(e)
   }
 }
@@ -363,4 +462,23 @@ pub fn ensure_asset_params_result(input : String) -> Result[String, CoreError] {
     Ok(_) => Ok(ensure_asset_params(input))
     Err(e) => Err(e)
   }
+}
+
+///|
+/// Never-fail variants for trust boundaries. A WASM trap takes down the host
+/// embedder, so these return `""` on any domain or invariant error instead of
+/// aborting. Callers should treat `""` as a failure signal. These are what the
+/// `*_safe` WASM exports delegate to.
+pub fn escape_html_safe(input : String) -> String {
+  escape_html_with_policy(input, EmptyOnError)
+}
+
+///|
+pub fn escape_attr_safe(input : String) -> String {
+  escape_attr_with_policy(input, EmptyOnError)
+}
+
+///|
+pub fn sanitize_filename_safe(name : String) -> String {
+  sanitize_filename_with_policy(name, EmptyOnError)
 }

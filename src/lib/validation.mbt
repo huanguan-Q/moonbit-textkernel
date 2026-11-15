@@ -10,6 +10,8 @@
 pub enum CoreError {
   InvalidInput(String)
   PerformanceWarning(String)
+  InputTooLarge(String)
+  InvariantViolation(String)
 }
 
 ///|
@@ -18,6 +20,46 @@ pub fn error_to_string(error : CoreError) -> String {
   match error {
     InvalidInput(msg) => "Invalid Input: " + msg
     PerformanceWarning(msg) => "Performance Warning: " + msg
+    InputTooLarge(msg) => "Input Too Large: " + msg
+    InvariantViolation(msg) => "Invariant Violation: " + msg
+  }
+}
+
+///|
+/// What the String-returning compatibility layer does when a checked call
+/// fails. `FailFast` keeps the historical behaviour (abort); `EmptyOnError`
+/// returns `""`, which is safe for every kernel — it is neither markup nor an
+/// unsanitised filename. Callers should treat `""` as a failure signal.
+///
+/// Production code should prefer the `*_result` API and never need a policy:
+/// the Result carries the error and no abort is possible on that path.
+pub enum FailurePolicy {
+  FailFast
+  EmptyOnError
+}
+
+///|
+/// Cross-package constructors. Enum variants are read-only outside their own
+/// package, so blackbox tests and FFI shims need these to obtain a policy.
+pub fn fail_fast_policy() -> FailurePolicy {
+  FailFast
+}
+
+///|
+pub fn empty_on_error_policy() -> FailurePolicy {
+  EmptyOnError
+}
+
+///|
+/// The single place in this library that can abort. Keeping it here means the
+/// abort surface is one function, not four scattered checks.
+pub fn apply_failure_policy(
+  error : CoreError,
+  policy : FailurePolicy,
+) -> String {
+  match policy {
+    FailFast => abort("textkernel: " + error_to_string(error))
+    EmptyOnError => ""
   }
 }
 

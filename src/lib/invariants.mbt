@@ -78,9 +78,32 @@ pub const MAX_SHIPPING_CODE_UNITS : Int32 = 8000000
 /// This is the runtime form of the kernels' `proof_require` on length: at the
 /// shipping layer there is no `dst` buffer to size, so the only precondition
 /// with an analogue here is the domain cap. `what` only shapes the message.
+pub fn check_code_unit_count(
+  n : Int32,
+  what : String,
+) -> Result[Unit, CoreError] {
+  if n > MAX_SHIPPING_CODE_UNITS {
+    Err(InputTooLarge(what + ": input exceeds MAX_SHIPPING_CODE_UNITS"))
+  } else {
+    Ok(())
+  }
+}
+
+///|
+/// Checked form of the domain guard. No abort; the caller decides.
+pub fn check_model_length(s : String, what : String) -> Result[Unit, CoreError] {
+  check_code_unit_count(s.length(), what)
+}
+
+///|
+/// Legacy Unit-returning guard. Kept for callers that only want fail-fast;
+/// it routes through the one policy function so the abort surface stays single.
 pub fn require_model_length(s : String, what : String) -> Unit {
-  if s.length() > MAX_SHIPPING_CODE_UNITS {
-    abort(what + ": input exceeds MAX_SHIPPING_CODE_UNITS")
+  match check_model_length(s, what) {
+    Ok(_) => ()
+    Err(e) => {
+      let _ = apply_failure_policy(e, FailFast)
+    }
   }
 }
 
