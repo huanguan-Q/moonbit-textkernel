@@ -1,0 +1,25 @@
+import {
+  "huanguan-Q/textkernel/src/lib",
+}
+
+pkgtype(kind: "executable")
+
+options(
+  link: {
+    "wasm-gc": {
+      "exports": [
+        "escape_html",
+        "escape_attr",
+        "sanitize_filename",
+        "normalize_asset_url",
+        "decide_referrer_policy",
+        "str_contains",
+        "escape_htmls_joined",
+        "escape_attrs_joined",
+        "sanitize_filenames_joined",
+        "normalize_asset_urls_joined",
+      ],
+      "use-js-builtin-string": true,
+    },
+  },
+)
