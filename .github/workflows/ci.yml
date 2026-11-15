@@ -42,6 +42,37 @@ jobs:
       - name: Validate package metadata
         run: moon publish --dry-run
 
+  wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Install MoonBit (pinned)
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.moon/bin:$PATH"
+          moon version --all
+          got=$(moon version | head -1 | awk '{print $2}')
+          if [ "$got" != "$MOON_VERSION" ]; then
+            echo "::error::moon is '$got' but this workflow pins '$MOON_VERSION'."
+            exit 1
+          fi
+
+      - name: Committed artefact works
+        # Proves the shipped .wasm is callable, not just present.
+        run: node examples/wasm-node/demo.mjs
+
+      - name: Rebuild from source and verify
+        # Proves the artefact is reproducible from the MoonBit sources.
+        run: |
+          node scripts/build_wasm.mjs
+          node examples/wasm-node/demo.mjs
+
   proof:
     runs-on: ubuntu-latest
     timeout-minutes: 40
