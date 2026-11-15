@@ -10,7 +10,7 @@ set of routines for those four jobs, with the safety properties discharged by
 `moon prove` rather than by inspection.
 
 ```
-huanguan-Q/textkernel    137 tests × 4 backends    419 proof goals (5x gate)    zero deps
+huanguan-Q/textkernel    140 tests × 4 backends    419 proof goals    10 WASM exports    zero deps
 ```
 
 ## What is in the box
@@ -40,6 +40,8 @@ moon prove                               # 191 goals with the stock solver limit
 node scripts/prove_gate.mjs              # 419 goals, 5x limits, machine-int model
 moon run src/demo --target native        # runnable example
 moon publish --dry-run                   # validate package metadata without releasing
+node scripts/build_wasm.mjs              # build wasm/textkernel.wasm
+node examples/wasm-node/demo.mjs         # call the WASM exports from JavaScript
 ```
 
 Two proof counts appear above because they answer different questions: the
@@ -67,6 +69,33 @@ let out = @lib.join_joined(@lib.quick_batch_escape_htmls(items), "|")
 
 See `src/demo/main.mbt` for a complete runnable example.
 
+## WASM / calling from JavaScript
+
+`src/main` is a thin export shim. With `use-js-builtin-string` the linker
+exposes `String -> String` functions directly to a JS host — no linear-memory
+ABI, no manual allocation, no UTF-8 copy:
+
+| Single value | Joined-list batch (`joined`, `sep`) |
+|---|---|
+| `escape_html`, `escape_attr`, `sanitize_filename` | `escape_htmls_joined`, `escape_attrs_joined`, `sanitize_filenames_joined` |
+| `normalize_asset_url`, `decide_referrer_policy`, `str_contains` | `normalize_asset_urls_joined` |
+
+```bash
+node scripts/build_wasm.mjs        # 8.4 KB artefact, verifies all 10 exports
+node examples/wasm-node/demo.mjs   # 11 assertions across all 10 exports
+```
+
+`examples/wasm-node/loader.mjs` reads the module's import table and supplies
+the imported string constants as plain JS globals. That works on **Node 22+
+and Chrome** alike: Chrome can synthesise them with the
+`importedStringConstants` compile option, but Node 22 does not implement that
+option, so the loader does not depend on it. The builtin `wasm:js-string`
+functions come from `new WebAssembly.Module(bytes, { builtins: ["js-string"] })`.
+
+The committed `wasm/textkernel.wasm` is a convenience copy so the example runs
+straight after a clone. CI rebuilds from source on every push and runs the
+example again, so a stale artefact cannot claim to be working code.
+
 ## Boundaries — read this before relying on it
 
 - **The prover has no model for `String`.** The proved kernels in `src/proof`
@@ -85,6 +114,9 @@ See `src/demo/main.mbt` for a complete runnable example.
 - **`batch.mbt` proves the arithmetic**, not scheduling, concurrency or
   timing. `BatchConfig.max_concurrent` / `timeout_ms` are configuration
   fields, not enforced behaviour.
+- **The WASM ABI requires JS string builtins.** It is not usable from a host
+  without `wasm:js-string` support (e.g. a plain `wasmtime` embedder). A
+  linear-memory ABI is not currently provided.
 - The host allow-list and default query params are **constants in `core.mbt`**,
   deliberately set to reserved example domains (`cdn.example.com`,
   `assets.example.org`, RFC 2606). This is a general-purpose library; it has no

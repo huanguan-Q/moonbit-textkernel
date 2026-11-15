@@ -32,6 +32,12 @@ All three string builders use `StringBuilder`, so output construction is
 amortised O(n) on every backend. A legacy-vs-rewrite differential test
 (`string_builder_regression_test.mbt`) pins byte-for-byte equality.
 
+## WASM
+
+`node scripts/build_wasm.mjs` builds a WASM-GC artefact with 10
+`String -> String` exports (JS string builtins). See
+`examples/wasm-node/demo.mjs` for a runnable host example.
+
 ## Provenance & License
 
 Independent implementation by the repository owner, extracted from a larger
