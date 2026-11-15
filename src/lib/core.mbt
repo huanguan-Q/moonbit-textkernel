@@ -135,41 +135,44 @@ pub fn sanitize_filename(name : String) -> String {
   require_model_length(name, "sanitize_filename")
   let base = if name.length() == 0 { "file" } else { name }
 
-  // Use original algorithm but with some optimizations
+  // A StringBuilder keeps the loop amortised O(n). The previous
+  // `out = out + x` copied the whole prefix on every iteration, which made the
+  // native backend quadratic (4x input -> ~8x runtime, measured 20k -> 80k
+  // code units). Output is byte-for-byte identical; see
+  // `string_builder_regression_test.mbt` for the legacy-vs-new differential.
+  let out = StringBuilder(size_hint=120)
   let mut i = 0
-  let mut out = ""
   let mut count = 0
   while i < base.length() && count < 120 {
     let code = base[i]
 
-    // Check for invalid filename characters first (faster path)
     if is_invalid_filename_char(code) {
-      out = out + "_"
+      out.write_char('_')
       i = i + 1
       count = count + 1
       continue
     }
 
-    // Convert current code unit to Char if possible; otherwise replace with '_'
     match code.to_char() {
       Some(c) => {
-        out = out + c.to_string()
+        out.write_char(c)
         i = i + 1
         count = count + 1
       }
       None => {
         // Unpaired surrogate, replace and advance one unit
-        out = out + "_"
+        out.write_char('_')
         i = i + 1
         count = count + 1
       }
     }
   }
+  let result = out.to_string()
   // SEC-S1 mirror: `sanitized_prefix` is proved for `sanitize_codes` only.
-  if !filename_is_sanitized(out) {
+  if !filename_is_sanitized(result) {
     abort("sanitize_filename: output violates the filename invariant")
   }
-  out
+  result
 }
 
 ///|
@@ -192,43 +195,45 @@ fn is_invalid_filename_char(code : UInt16) -> Bool {
 /// Non-ASCII code units are preserved when decodable as Char; undecodable units become '_'.
 pub fn escape_html(input : String) -> String {
   require_model_length(input, "escape_html")
+  // Amortised O(n): see the note in `sanitize_filename`.
+  let out = StringBuilder(size_hint=input.length())
   let mut i = 0
-  let mut out = ""
   while i < input.length() {
     let code = input[i]
     if code == '&' {
-      out = out + "&amp;"
+      out.write_string("&amp;")
       i = i + 1
       continue
     }
     if code == '<' {
-      out = out + "&lt;"
+      out.write_string("&lt;")
       i = i + 1
       continue
     }
     if code == '>' {
-      out = out + "&gt;"
+      out.write_string("&gt;")
       i = i + 1
       continue
     }
     match code.to_char() {
       Some(c) => {
-        out = out + c.to_string()
+        out.write_char(c)
         i = i + 1
       }
       None => {
-        out = out + "_"
+        out.write_char('_')
         i = i + 1
       }
     }
   }
+  let result = out.to_string()
   // SEC-S1 mirror: `no_markup_prefix` / `entities_ok_prefix` are proved for
   // `escape_html_codes`, not for this function. Check the result before handing
   // it back, so a regression here cannot quietly produce markup.
-  if !html_is_escaped(out) {
+  if !html_is_escaped(result) {
     abort("escape_html: output violates the escape invariant")
   }
-  out
+  result
 }
 
 ///|
@@ -236,51 +241,53 @@ pub fn escape_html(input : String) -> String {
 /// Mappings: '&' -> &amp;, '<' -> &lt;, '>' -> &gt;, '"' -> &quot;, '\'' -> &#39;
 pub fn escape_attr(input : String) -> String {
   require_model_length(input, "escape_attr")
+  // Amortised O(n): see the note in `sanitize_filename`.
+  let out = StringBuilder(size_hint=input.length())
   let mut i = 0
-  let mut out = ""
   while i < input.length() {
     let code = input[i]
     if code == '&' {
-      out = out + "&amp;"
+      out.write_string("&amp;")
       i = i + 1
       continue
     }
     if code == '<' {
-      out = out + "&lt;"
+      out.write_string("&lt;")
       i = i + 1
       continue
     }
     if code == '>' {
-      out = out + "&gt;"
+      out.write_string("&gt;")
       i = i + 1
       continue
     }
     if code == '"' {
-      out = out + "&quot;"
+      out.write_string("&quot;")
       i = i + 1
       continue
     }
     if code == '\'' {
-      out = out + "&#39;"
+      out.write_string("&#39;")
       i = i + 1
       continue
     }
     match code.to_char() {
       Some(c) => {
-        out = out + c.to_string()
+        out.write_char(c)
         i = i + 1
       }
       None => {
-        out = out + "_"
+        out.write_char('_')
         i = i + 1
       }
     }
   }
+  let result = out.to_string()
   // SEC-S1 mirror: `no_quote_prefix` is proved for `escape_attr_codes` only.
-  if !attr_is_escaped(out) {
+  if !attr_is_escaped(result) {
     abort("escape_attr: output violates the attribute-escape invariant")
   }
-  out
+  result
 }
 
 ///|
