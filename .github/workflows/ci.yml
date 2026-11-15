@@ -65,13 +65,16 @@ jobs:
 
       - name: Committed artefact works
         # Proves the shipped .wasm is callable, not just present.
-        run: node examples/wasm-node/demo.mjs
+        run: |
+          node examples/wasm-node/demo.mjs
+          node examples/wasm-node/render.mjs
 
       - name: Rebuild from source and verify
         # Proves the artefact is reproducible from the MoonBit sources.
         run: |
           node scripts/build_wasm.mjs
           node examples/wasm-node/demo.mjs
+          node examples/wasm-node/render.mjs
 
   proof:
     runs-on: ubuntu-latest

@@ -10,7 +10,7 @@ set of routines for those four jobs, with the safety properties discharged by
 `moon prove` rather than by inspection.
 
 ```
-huanguan-Q/textkernel    140 tests × 4 backends    419 proof goals    10 WASM exports    zero deps
+huanguan-Q/textkernel    146 tests × 4 backends    419 proof goals    13 WASM exports    zero deps
 ```
 
 ## What is in the box
@@ -42,6 +42,7 @@ moon run src/demo --target native        # runnable example
 moon publish --dry-run                   # validate package metadata without releasing
 node scripts/build_wasm.mjs              # build wasm/textkernel.wasm
 node examples/wasm-node/demo.mjs         # call the WASM exports from JavaScript
+node examples/wasm-node/render.mjs       # downstream consumer example
 ```
 
 Two proof counts appear above because they answer different questions: the
@@ -79,10 +80,12 @@ ABI, no manual allocation, no UTF-8 copy:
 |---|---|
 | `escape_html`, `escape_attr`, `sanitize_filename` | `escape_htmls_joined`, `escape_attrs_joined`, `sanitize_filenames_joined` |
 | `normalize_asset_url`, `decide_referrer_policy`, `str_contains` | `normalize_asset_urls_joined` |
+| `escape_html_safe`, `escape_attr_safe`, `sanitize_filename_safe` | — never-fail variants |
 
 ```bash
-node scripts/build_wasm.mjs        # 8.4 KB artefact, verifies all 10 exports
-node examples/wasm-node/demo.mjs   # 11 assertions across all 10 exports
+node scripts/build_wasm.mjs        # 9.6 KB artefact, verifies all 13 exports
+node examples/wasm-node/demo.mjs   # assertions across all 13 exports
+node examples/wasm-node/render.mjs # realistic downstream consumer
 ```
 
 `examples/wasm-node/loader.mjs` reads the module's import table and supplies
@@ -95,6 +98,33 @@ functions come from `new WebAssembly.Module(bytes, { builtins: ["js-string"] })`
 The committed `wasm/textkernel.wasm` is a convenience copy so the example runs
 straight after a clone. CI rebuilds from source on every push and runs the
 example again, so a stale artefact cannot claim to be working code.
+
+## Error handling
+
+**The production path never aborts.** The `*_result` variants return
+`Result[String, CoreError]` and cover both failure sources: an input outside
+the shipping domain (`InputTooLarge`) and a violated output invariant
+(`InvariantViolation`). `CoreError` carries both alongside the original
+`InvalidInput` / `PerformanceWarning`; `error_to_string` renders all four.
+
+The String-returning `escape_html` / `escape_attr` / `sanitize_filename` are a
+**compatibility layer** kept for existing callers and the WASM ABI. They route
+every failure through `apply_failure_policy` — the single place in the library
+that can abort. Callers choose a policy explicitly with `*_with_policy`:
+
+| Policy | Behaviour | Use |
+|---|---|---|
+| `FailFast` (compatibility default) | abort | Trusted inputs; preserves historical semantics |
+| `EmptyOnError` | return `""` | Trust boundaries where a trap would take down the host |
+
+`""` is safe for every kernel: it is neither markup nor an unsanitised
+filename. `*_safe` variants and their three WASM exports use `EmptyOnError`.
+
+`examples/wasm-node/render.mjs` exercises the whole thing as a downstream
+consumer would: it renders untrusted comments into HTML, escapes text nodes
+and attributes separately, rejects an 8,000,001-code-unit payload **without
+trapping the host**, and shows that the fail-fast export still traps — now an
+explicit policy choice instead of the only behaviour available.
 
 ## Boundaries — read this before relying on it
 
@@ -112,8 +142,9 @@ example again, so a stale artefact cannot claim to be working code.
   `MAX_SHIPPING_CODE_UNITS` (8,000,000 code units) is the tighter bound the
   shipping layer enforces. Both are documented in `invariants.mbt`.
 - **`batch.mbt` proves the arithmetic**, not scheduling, concurrency or
-  timing. `BatchConfig.max_concurrent` / `timeout_ms` are configuration
-  fields, not enforced behaviour.
+  timing. `BatchConfig` now has exactly one field (`batch_size`): the earlier
+  `max_concurrent` / `enable_memory_pool` / `timeout_ms` were removed because
+  a pure function has no scheduler, pool or clock to honour them.
 - **The WASM ABI requires JS string builtins.** It is not usable from a host
   without `wasm:js-string` support (e.g. a plain `wasmtime` embedder). A
   linear-memory ABI is not currently provided.
@@ -121,6 +152,9 @@ example again, so a stale artefact cannot claim to be working code.
   deliberately set to reserved example domains (`cdn.example.com`,
   `assets.example.org`, RFC 2606). This is a general-purpose library; it has no
   knowledge of, and no integration with, any specific content platform.
+- **No third-party adoption yet.** There are no downstream dependents
+  outside this repository's own examples. `render.mjs` shows the shape a
+  consumer would write; it is not evidence of adoption.
 
 ## Performance
 

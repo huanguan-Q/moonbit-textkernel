@@ -32,6 +32,12 @@ All three string builders use `StringBuilder`, so output construction is
 amortised O(n) on every backend. A legacy-vs-rewrite differential test
 (`string_builder_regression_test.mbt`) pins byte-for-byte equality.
 
+## Errors
+
+`*_result` returns `Result[String, CoreError]` and never aborts. The
+String-returning API is a compatibility layer with an explicit
+`FailurePolicy` (`FailFast` / `EmptyOnError`); `*_safe` always uses the latter.
+
 ## WASM
 
 `node scripts/build_wasm.mjs` builds a WASM-GC artefact with 10
