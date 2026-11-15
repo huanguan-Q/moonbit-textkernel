@@ -439,13 +439,13 @@ test "conform - shipped batching stays total for a non-positive batch size" {
   // requires every item to come out, in order.
   //
   // These values are only reachable because `@lib.create_batch_config` exists:
-  // `BatchConfig`'s fields are read-only outside `src/lib`, so without it the
-  // guarded inputs could not be constructed from here at all.
+  // `BatchConfig` is a single-field struct, so this constructor is what
+  // lets the corpus drive the guarded arithmetic from outside `src/lib`.
   let items : Array[Int32] = [1, 2, 3, 4, 5]
   let min_int32 = -2147483647 - 1
   let sizes : Array[Int32] = [0, -1, min_int32, 1, 2, 5, 500]
   for i = 0; i < sizes.length(); i = i + 1 {
-    let config = @lib.create_batch_config(sizes[i], 1, false, 0)
+    let config = @lib.create_batch_config(sizes[i])
     let result = @lib.batch_process_custom(items, fn(x) { x * 10 }, config)
     assert_eq(result.processed_count, 5)
     assert_eq(result.results.length(), items.length())

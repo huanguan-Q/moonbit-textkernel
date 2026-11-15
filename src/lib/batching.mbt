@@ -12,11 +12,14 @@
 
 ///|
 /// Chunking configuration. `batch_size <= 0` is clamped to 1, never divided by.
+///
+/// This struct deliberately has exactly one field. The original batching layer
+/// also exposed `max_concurrent`, `enable_memory_pool` and `timeout_ms`, but
+/// none of them affected the loop — a pure function has no scheduler, no pool
+/// and no clock. Keeping them would have advertised semantics the code does
+/// not implement.
 pub struct BatchConfig {
   batch_size : Int32
-  max_concurrent : Int32
-  enable_memory_pool : Bool
-  timeout_ms : Int32
 }
 
 ///|
@@ -28,23 +31,18 @@ pub struct BatchResult[T] {
 }
 
 ///|
-pub fn create_batch_config(
-  batch_size : Int32,
-  max_concurrent : Int32,
-  enable_memory_pool : Bool,
-  timeout_ms : Int32,
-) -> BatchConfig {
-  { batch_size, max_concurrent, enable_memory_pool, timeout_ms, }
+pub fn create_batch_config(batch_size : Int32) -> BatchConfig {
+  { batch_size, }
 }
 
 ///|
 pub fn create_large_dataset_config() -> BatchConfig {
-  create_batch_config(500, 8, true, 60000)
+  create_batch_config(500)
 }
 
 ///|
 pub fn create_realtime_config() -> BatchConfig {
-  create_batch_config(50, 2, false, 5000)
+  create_batch_config(50)
 }
 
 ///|
