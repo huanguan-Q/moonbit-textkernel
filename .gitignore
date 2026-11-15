@@ -10,3 +10,8 @@ bisect.coverage
 .DS_Store
 .idea/
 .vscode/
+
+# Credentials and local logs
+.env
+*.pem
+*.log

@@ -184,10 +184,12 @@ backends. The proof kernels and their 419 goals are untouched — they operate o
 code-unit arrays, and `src/proof/conform.mbt` still pins them to the shipped
 String API.
 
-Reproduce the benchmark by exporting the tree and generating the variants in
-`/tmp/tk-bench2` (see `.workbuddy/audits/2026-11-15-textkernel-commercial-value.md`
-for the harness). The numbers are a regression guard, not a promise: absolute
-throughput depends on the backend and host.
+To reproduce, export the tree with `git archive HEAD`, build a small release
+executable that calls `escape_html` N times over a string grown by doubling
+`"a<&>x"`, and time it with `/usr/bin/time -p`. Subtract a baseline variant
+that only measures `input.length()` to remove process startup, and use the
+identical harness before and after a change. The numbers are a regression
+guard, not a promise: absolute throughput depends on the backend and host.
 
 ## Provenance & License
 
