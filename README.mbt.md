@@ -26,6 +26,12 @@ the shipped `String` API over an enumerated corpus. `src/lib` is not in the
 proof denominator because the prover has no `String` model — runtime invariant
 checks cover that layer instead. Full boundaries are documented in `README.md`.
 
+## Performance
+
+All three string builders use `StringBuilder`, so output construction is
+amortised O(n) on every backend. A legacy-vs-rewrite differential test
+(`string_builder_regression_test.mbt`) pins byte-for-byte equality.
+
 ## Provenance & License
 
 Independent implementation by the repository owner, extracted from a larger

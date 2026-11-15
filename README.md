@@ -90,6 +90,39 @@ See `src/demo/main.mbt` for a complete runnable example.
   `assets.example.org`, RFC 2606). This is a general-purpose library; it has no
   knowledge of, and no integration with, any specific content platform.
 
+## Performance
+
+The escapers and the filename sanitiser used to build their result with
+`out = out + fragment` inside a loop. That copies the whole prefix on every
+iteration, which made the **native** backend quadratic: 4x input produced ~8x
+runtime. They now write into a `StringBuilder`, which is amortised O(n).
+
+Measured on `moon 0.1.20261104`, native release, 100 rounds of `escape_html`
+(identical harness before and after, inclusive of process startup):
+
+| Input (UTF-16 code units) | Before | After | Speedup |
+|---:|---:|---:|---:|
+| 20,480 | 6.06 s | 0.49 s | 12x |
+| 81,920 | 50.54 s | 0.56 s | 90x |
+| 327,680 | 187.8 s / **20 rounds** | 0.73 s / **100 rounds** | ~1300x per round |
+
+A 1000-round run after the fix (which also reads the produced string's tail, so
+the work cannot be optimised away) stays linear: 0.63 s / 0.90 s / 2.35 s for
+20k / 80k / 327k code units. The JS backend was already linear and is
+unchanged: 0.12 s / 0.34 s for 20k / 80k at 100 rounds.
+
+Output is byte-for-byte identical. `src/lib/string_builder_regression_test.mbt`
+keeps the original implementations as private oracles and asserts equality over
+an enumerated corpus plus 200 deterministic pseudo-random strings, on all four
+backends. The proof kernels and their 419 goals are untouched — they operate on
+code-unit arrays, and `src/proof/conform.mbt` still pins them to the shipped
+String API.
+
+Reproduce the benchmark by exporting the tree and generating the variants in
+`/tmp/tk-bench2` (see `.workbuddy/audits/2026-11-15-textkernel-commercial-value.md`
+for the harness). The numbers are a regression guard, not a promise: absolute
+throughput depends on the backend and host.
+
 ## Provenance & License
 
 All code here is an independent implementation. It was extracted from a larger
