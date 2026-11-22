@@ -140,7 +140,7 @@ fn sanitize_filename_build(name : String) -> String {
   // native backend quadratic (4x input -> ~8x runtime, measured 20k -> 80k
   // code units). Output is byte-for-byte identical; see
   // `string_builder_regression_test.mbt` for the legacy-vs-new differential.
-  let out = StringBuilder(size_hint=120)
+  let out = StringBuilder(capacity=120)
   let mut i = 0
   let mut count = 0
   while i < base.length() && count < 120 {
@@ -231,7 +231,7 @@ fn is_invalid_filename_char(code : UInt16) -> Bool {
 fn escape_html_build(input : String) -> String {
   require_model_length(input, "escape_html")
   // Amortised O(n): see the note in `sanitize_filename`.
-  let out = StringBuilder(size_hint=input.length())
+  let out = StringBuilder(capacity=input.length())
   let mut i = 0
   while i < input.length() {
     let code = input[i]
@@ -306,7 +306,7 @@ pub fn escape_html(input : String) -> String {
 fn escape_attr_build(input : String) -> String {
   require_model_length(input, "escape_attr")
   // Amortised O(n): see the note in `sanitize_filename`.
-  let out = StringBuilder(size_hint=input.length())
+  let out = StringBuilder(capacity=input.length())
   let mut i = 0
   while i < input.length() {
     let code = input[i]

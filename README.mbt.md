@@ -2,7 +2,7 @@
 
 A formally verified MoonBit kernel for HTML escaping, filename sanitisation,
 URL rewriting and joined-list batch operations. Zero dependencies, four
-backends, 137 tests and 419 proof goals under the 5x proof gate.
+backends, 146 tests and 419 proof goals under the 5x proof gate.
 
 ## Usage
 
@@ -20,7 +20,9 @@ its own output against the escape invariants before returning.
 
 Run `moon test --target all` and `node scripts/prove_gate.mjs` (5x solver
 limits, 32-bit machine-integer model, 419 goals). A bare `moon prove`
-discharges 191 goals with the stock limits and may report timeouts. The proved kernels live in
+discharges 191 goals with the stock limits and may report timeouts.
+Re-verified 2026-11-22 on `moon 0.1.20261119`: 146/146 tests pass on all four
+backends. The proved kernels live in
 `src/proof` over UTF-16 code-unit arrays; `src/proof/conform.mbt` pins them to
 the shipped `String` API over an enumerated corpus. `src/lib` is not in the
 proof denominator because the prover has no `String` model — runtime invariant
@@ -40,8 +42,9 @@ String-returning API is a compatibility layer with an explicit
 
 ## WASM
 
-`node scripts/build_wasm.mjs` builds a WASM-GC artefact with 10
-`String -> String` exports (JS string builtins). See
+`node scripts/build_wasm.mjs` builds a WASM-GC artefact with 13 business
+exports over JS strings (14 module exports including `_start`). The ABI relies
+on `wasm:js-string` builtins and offers no linear-memory alternative. See
 `examples/wasm-node/demo.mjs` for a runnable host example.
 
 ## Provenance & License

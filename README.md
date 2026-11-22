@@ -10,7 +10,7 @@ set of routines for those four jobs, with the safety properties discharged by
 `moon prove` rather than by inspection.
 
 ```
-huanguan-Q/textkernel    146 tests × 4 backends    419 proof goals    13 WASM exports    zero deps
+huanguan-Q/textkernel    146 tests × 4 backends    419 proof goals    13 WASM API exports (+ `_start`)    zero deps
 ```
 
 ## What is in the box
@@ -35,7 +35,7 @@ quietly emitting markup the caller believes is escaped.
 ```bash
 moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
-moon test --target all                    # 137/137 on each backend
+moon test --target all                    # 146/146 on each backend
 moon prove                               # 191 goals with the stock solver limits
 node scripts/prove_gate.mjs              # 419 goals, 5x limits, machine-int model
 moon run src/demo --target native        # runnable example
@@ -54,6 +54,13 @@ handful of timeouts on a loaded machine.
 Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
 z3. The proof verdicts depend on the VC generator, so pin the toolchain when
 reproducing; `.github/workflows/ci.yml` asserts the version.
+
+Re-verified 2026-11-19 on the local toolchain `moon 0.1.20261117 (eb64713)`:
+146/146 tests pass on all four backends, `moon prove` discharges 191 goals,
+`node scripts/prove_gate.mjs` discharges 419, and `moon check --target all
+--deny-warn` is clean after migrating `StringBuilder(size_hint=...)` to the
+official `StringBuilder(capacity=...)` spelling (warning 0020). The local
+toolchain is newer than the CI pin — CI still pins 0.1.20261104 deliberately.
 
 ## Use
 
@@ -83,8 +90,8 @@ ABI, no manual allocation, no UTF-8 copy:
 | `escape_html_safe`, `escape_attr_safe`, `sanitize_filename_safe` | — never-fail variants |
 
 ```bash
-node scripts/build_wasm.mjs        # 9.6 KB artefact, verifies all 13 exports
-node examples/wasm-node/demo.mjs   # assertions across all 13 exports
+node scripts/build_wasm.mjs        # ~9.6 KB artefact, verifies 13 API exports (+ `_start`)
+node examples/wasm-node/demo.mjs   # assertions across all 13 API exports
 node examples/wasm-node/render.mjs # realistic downstream consumer
 ```
 

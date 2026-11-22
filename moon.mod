@@ -19,7 +19,3 @@ keywords = [
 ]
 
 preferred_target = "wasm-gc"
-
-options(
-  dependencies: { },
-)

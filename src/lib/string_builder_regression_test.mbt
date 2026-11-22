@@ -168,7 +168,7 @@ fn differential_corpus() -> Array[String] {
   corpus.push("/\\:*?\"<>|")
   // Length boundaries around the 120-code-unit clamp.
   for n in [1, 118, 119, 120, 121, 122, 240] {
-    let b = StringBuilder(size_hint=n)
+    let b = StringBuilder(capacity=n)
     for _j = 0; _j < n; _j = _j + 1 {
       b.write_string("x")
     }
@@ -178,7 +178,7 @@ fn differential_corpus() -> Array[String] {
   for _case = 0; _case < 200; _case = _case + 1 {
     seed = (seed * 31 + 17) % 1048576
     let len = seed % 160
-    let b = StringBuilder(size_hint=len)
+    let b = StringBuilder(capacity=len)
     for _j = 0; _j < len; _j = _j + 1 {
       seed = (seed * 31 + 17) % 1048576
       b.write_string(pool[seed % pool.length()])
