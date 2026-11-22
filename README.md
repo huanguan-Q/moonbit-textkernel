@@ -1,5 +1,13 @@
 # textkernel
 
+[![quality](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=quality)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
+[![proof](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=proof)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
+[![wasm](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=wasm)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
+[![compat](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=compat)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
+[![mooncakes](https://img.shields.io/badge/mooncakes-0.1.3-blue)](https://mooncakes.io/docs/huanguan-Q/textkernel)
+[![skills](https://img.shields.io/badge/mooncakes%20skills-0.1.3-purple)](https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.3)
+[![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+
 **A small, formally verified MoonBit kernel for text that crosses a trust boundary.**
 
 When a program takes a string from one system and puts it into another — into
@@ -109,8 +117,8 @@ configuration, so existing callers do not break.
 The same operations are available as a CLI with JSON-lines output:
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.1.2 -- --help
-moonx huanguan-Q/textkernel/src/main@0.1.2 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.3 -- --help
+moonx huanguan-Q/textkernel/src/main@0.1.3 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename < names.txt
 ```
 
@@ -196,13 +204,12 @@ explicit policy choice instead of the only behaviour available.
 - **The WASM ABI requires JS string builtins.** It is not usable from a host
   without `wasm:js-string` support (e.g. a plain `wasmtime` embedder). A
   linear-memory ABI is not currently provided.
-- The host allow-list and default query params are **constants in `core.mbt`**,
-  deliberately set to reserved example domains (`cdn.example.com`,
-  `assets.example.org`, RFC 2606). This is a general-purpose library; it has no
-  knowledge of, and no integration with, any specific content platform.
-- **No third-party adoption yet.** There are no downstream dependents
-  outside this repository's own examples. `render.mjs` shows the shape a
-  consumer would write; it is not evidence of adoption.
+- The host allow-list and default query params are **data**, passed through
+  `AssetConfig`. The no-suffix functions keep the historical RFC 2606 example
+  domains (`cdn.example.com`, `assets.example.org`) as a compatibility default.
+- **No verified third-party adoption yet.** There are no downstream dependents
+  outside this repository's own examples. `ssr-middleware.mjs` shows the shape
+  a consumer would write; it is not evidence of adoption.
 
 ## Performance
 
@@ -243,8 +250,22 @@ guard, not a promise: absolute throughput depends on the backend and host.
 
 - `docs/BENCHMARK.md` — recorded native timings and reproduction method.
 - `docs/PROOF-REPORT.md` — what the proof gates establish and where the trusted seam is.
+- `docs/FORMAL-VERIFICATION-ARTICLE.md` — a reproducible walkthrough of the proof design.
 - `docs/ABI-EVALUATION.md` — why the current Wasm artefact needs JS string builtins and the proposed WASI path.
+- `docs/TOOLCHAIN-PIN.md` — why the CI compatibility pin is a repository variable.
+- Mooncakes Skills entry: <https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.3>.
 - `SKILL.md` — agent-facing command reference.
+- `docs/API-STABILITY.md` — SemVer contract and stable API surface.
+- `CHANGELOG.md` — release history.
+- `CONTRIBUTING.md` — development and review gates.
+- `SECURITY.md` — supported versions and private reporting.
+
+## Versioning
+
+This project follows Semantic Versioning 2.0.0. Patch releases are
+output-preserving bug fixes; minor releases add APIs with compatibility
+defaults; major releases may remove or change stable names. The stable surface
+and deprecation path are listed in `docs/API-STABILITY.md`.
 
 ## Provenance & License
 

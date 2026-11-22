@@ -21,7 +21,7 @@ allow-list and default query params without forking. The no-suffix functions
 keep the historical defaults. The same operations are available as a CLI:
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.1.2 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.3 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename < names.txt
 ```
 
@@ -55,6 +55,12 @@ String-returning API is a compatibility layer with an explicit
 exports over JS strings (14 module exports including `_start`). The ABI relies
 on `wasm:js-string` builtins and offers no linear-memory alternative. See
 `examples/wasm-node/demo.mjs` for a runnable host example.
+
+## Versioning and governance
+
+Semantic Versioning 2.0.0; see `CHANGELOG.md`, `CONTRIBUTING.md`,
+`SECURITY.md` and `docs/API-STABILITY.md` in the repository. Stable names keep
+their signature and semantics within a major version; configuration is additive.
 
 ## Provenance & License
 

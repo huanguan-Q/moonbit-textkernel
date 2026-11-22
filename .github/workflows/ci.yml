@@ -7,6 +7,43 @@ on:
   workflow_dispatch:
 
 jobs:
+  compat:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        track: [current, latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Select MoonBit version
+        id: toolchain
+        env:
+          PINNED: ${{ vars.MOONBIT_PINNED_VERSION }}
+        run: |
+          if [ "${{ matrix.track }}" = "current" ] && [ -n "$PINNED" ]; then
+            version="$PINNED"
+          else
+            version="latest"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "track=${{ matrix.track }} version=$version"
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o /tmp/moon-install.sh
+          bash /tmp/moon-install.sh "${{ steps.toolchain.outputs.version }}"
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.moon/bin:$PATH"
+          moon version --all
+
+      - name: Compatibility gate
+        run: |
+          moon fmt --check
+          moon check --target all --deny-warn
+          moon test --target all
+          moon run src/main --target native -- escape-html '<b>compat</b>'
+
   quality:
     runs-on: ubuntu-latest
     steps:
