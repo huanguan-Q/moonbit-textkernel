@@ -67,7 +67,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 40
     env:
-      PROVE_TIME_SCALE: "40"
+      PROVE_TIME_SCALE: "10"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -84,6 +84,9 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "22"
+
+      - name: Register Why3 provers
+        run: why3 config detect
 
       - name: Install modern Z3
         run: |
@@ -104,9 +107,9 @@ jobs:
           export PATH="$HOME/.moon/bin:$PATH"
           moon version --all
 
-      - name: Prove (40x limits, machine-int prelude)
+      - name: Prove (10x limits, machine-int prelude)
         run: |
           # A bare `moon prove` can time out on a loaded runner. The gate
-          # retries at ~40x limits and fails if a proof-enabled package is
+          # retries at ~10x limits and fails if a proof-enabled package is
           # skipped silently or if the goal count is zero.
           node scripts/prove_gate.mjs
