@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  MOON_VERSION: "0.1.20261104"
+  MOON_VERSION: "0.1.20261117"
 
 jobs:
   quality:
@@ -77,7 +77,7 @@ jobs:
           node examples/wasm-node/render.mjs
 
   proof:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -87,7 +87,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y z3 opam
           opam init --disable-sandboxing --bare -y
-          opam switch create default --packages=ocaml-base-compiler.4.14.0 -y || opam switch default
+          opam switch create default --packages=ocaml-system -y || opam switch default
           eval "$(opam env)"
           opam install -y why3=1.7.2 alt-ergo
           echo "$HOME/.opam/default/bin" >> "$GITHUB_PATH"
