@@ -1,0 +1,89 @@
+# ============================================================
+# pre-commit 钩子配置 · 开源/比赛提交专用
+#
+# 由 oss-leak-review 技能的 install-hooks.sh 自动安装到目标仓库根目录。
+# 安装后的目录布局:
+#   <repo>/.pre-commit-config.yaml
+#   <repo>/.leak-guard/allowlist-guard.sh
+#   <repo>/.leak-guard/pii-scan.sh
+#   <repo>/.leak-guard/gitleaks.toml
+#
+# 手动安装见 SKILL.md「安装钩子」一节。
+#
+# 依赖钉死：rev 一律用 40 位 commit SHA，不用 tag/分支。
+# 本技能自己要求「依赖不可变」，模板不能自反。
+# 升级步骤（逐个仓库）：
+#   git ls-remote https://github.com/<org>/<repo> refs/tags/<tag>
+#   # 若返回 annotated tag（object.type=tag），再取一次 tag 对象的 object.sha
+#   # 或直接用 GitHub API:
+#   #   /repos/<org>/<repo>/git/ref/tags/<tag>  → 需要时再解引用
+# 然后把新 SHA 与 tag 注释一起替换；publish-check.sh 会校验 rev 是否为 40 位 SHA。
+# ============================================================
+
+default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit]
+fail_fast: false
+
+repos:
+  # ---------- 基础卫生 ----------
+  # pre-commit-hooks v5.0.0
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: cef0300fd0fc4d2a87a85fa2093c6b283ea36f4b  # pragma: allowlist secret
+    hooks:
+      - id: detect-private-key          # 私钥文件/内容
+      - id: check-added-large-files     # 大文件
+        args: ['--maxkb=5120']
+      - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: forbid-submodules           # 子模块绕过扫描,比赛场景直接禁
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-json
+      - id: check-yaml
+        args: ['--allow-multiple-documents']
+      - id: check-toml
+
+  # ---------- 密钥扫描(使用本机已安装的 gitleaks,不联网构建) ----------
+  - repo: local
+    hooks:
+      - id: gitleaks
+        name: gitleaks (system, staged)
+        entry: gitleaks protect --staged --config .leak-guard/gitleaks.toml --redact -v
+        language: system
+        pass_filenames: false
+        always_run: true
+
+  # ---------- 审计型 baseline(Yelp) ----------
+  # detect-secrets v1.5.0
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: 01886c8a910c64595c47f186ca1ffc0b77fa5458  # pragma: allowlist secret
+    hooks:
+      - id: detect-secrets
+        exclude: '(?i)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|poetry\.lock)$'
+
+  # ---------- Notebook 输出清空 ----------
+  # nbstripout 0.8.1
+  - repo: https://github.com/kynan/nbstripout
+    rev: 4439d61ff1913ee7d1c0168948d79f0ae0da9799  # pragma: allowlist secret
+    hooks:
+      - id: nbstripout
+        args: ['--extra-keys', 'metadata.kernelspec metadata.language_info.version cell.metadata.executionInfo']
+
+  # ---------- 路径白名单守卫(本技能自带)----------
+  # 注意: .leak-guard/ 是本地防线,默认不提交。新机器需先运行:
+  #   bash ~/.workbuddy/skills/oss-leak-review/scripts/install-hooks.sh .
+  - repo: local
+    hooks:
+      - id: allowlist-guard
+        name: 白名单守卫 · 禁止非项目文件进入仓库
+        entry: bash .leak-guard/allowlist-guard.sh
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: pii-scan
+        name: 中文 PII 扫描 · 手机号/身份证/学号
+        entry: bash .leak-guard/pii-scan.sh
+        language: system
+        pass_filenames: false
+        always_run: true
