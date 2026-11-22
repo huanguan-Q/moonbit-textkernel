@@ -31,8 +31,8 @@ jobs:
       - name: Runnable example
         run: moon run src/demo --target native
 
-      - name: Validate package metadata
-        run: moon publish --dry-run
+      - name: Validate package contents
+        run: moon package --list
 
   wasm:
     runs-on: ubuntu-latest

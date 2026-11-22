@@ -39,7 +39,7 @@ moon test --target all                    # 146/146 on each backend
 moon prove                               # 191 goals with the stock solver limits
 node scripts/prove_gate.mjs              # 419 goals, 5x limits, machine-int model
 moon run src/demo --target native        # runnable example
-moon publish --dry-run                   # validate package metadata without releasing
+moon package --list                      # validate package contents without releasing
 node scripts/build_wasm.mjs              # build wasm/textkernel.wasm
 node examples/wasm-node/demo.mjs         # call the WASM exports from JavaScript
 node examples/wasm-node/render.mjs       # downstream consumer example
@@ -53,14 +53,22 @@ handful of timeouts on a loaded machine.
 
 Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
 z3. The proof verdicts depend on the VC generator, so pin the toolchain when
-reproducing; `.github/workflows/ci.yml` asserts the version.
+reproducing; the historical pin is kept here for provenance.
 
 Re-verified 2026-11-19 on the local toolchain `moon 0.1.20261117 (eb64713)`:
 146/146 tests pass on all four backends, `moon prove` discharges 191 goals,
 `node scripts/prove_gate.mjs` discharges 419, and `moon check --target all
 --deny-warn` is clean after migrating `StringBuilder(size_hint=...)` to the
-official `StringBuilder(capacity=...)` spelling (warning 0020). The local
-toolchain is newer than the CI pin — CI still pins 0.1.20261104 deliberately.
+official `StringBuilder(capacity=...)` spelling (warning 0020).
+
+Release update 2026-11-22: the dated CLI binaries for 0.1.20261104 and
+0.1.20261117 are no longer downloadable, so CI now installs the latest
+available MoonBit CLI and runs the proof job on `ubuntu-22.04` (Ubuntu 26.04's
+OCaml 5.4 conflicts with why3 1.7.2). Re-checked locally on `moon 0.1.20261119`:
+format, check and all 146x4 tests are green, but `scripts/prove_gate.mjs`
+reports 425 goals proved with 1 timeout and fails. Treat the proof result as
+environment-sensitive and do not bump the prover without re-establishing the
+419-goal gate.
 
 ## Use
 
