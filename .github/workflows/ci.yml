@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 env:
-  MOON_VERSION: "0.1.20261117"
+  MOON_VERSION: "0.1.20261119"
 
 jobs:
   quality:
