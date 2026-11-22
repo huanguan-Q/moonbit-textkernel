@@ -37,7 +37,7 @@ moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
 moon test --target all                    # 146/146 on each backend
 moon prove                               # 191 goals with the stock solver limits
-node scripts/prove_gate.mjs              # 419 goals, 5x limits, machine-int model
+node scripts/prove_gate.mjs              # 419 goals, 10x solver limits in CI, machine-int model
 moon run src/demo --target native        # runnable example
 moon package --list                      # validate package contents without releasing
 node scripts/build_wasm.mjs              # build wasm/textkernel.wasm
@@ -47,9 +47,9 @@ node examples/wasm-node/render.mjs       # downstream consumer example
 
 Two proof counts appear above because they answer different questions: the
 stock `moon prove` run discharges 191 goals, while `scripts/prove_gate.mjs`
-retries at ~5x solver limits under the 32-bit machine-integer prelude and
-discharges 419. The gate is what CI uses; a bare `moon prove` can report a
-handful of timeouts on a loaded machine.
+retries at higher solver limits (5x by default, 10x in CI) under the 32-bit
+machine-integer prelude and discharges 419. The gate is what CI uses; the extra
+budget is needed because the newest CLI leaves one goal timing out at 5x.
 
 Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
 z3. The proof verdicts depend on the VC generator, so pin the toolchain when
@@ -65,10 +65,11 @@ Release update 2026-11-22: the dated CLI binaries for 0.1.20261104 and
 0.1.20261117 are no longer downloadable, so CI now installs the latest
 available MoonBit CLI and runs the proof job on `ubuntu-22.04` (Ubuntu 26.04's
 OCaml 5.4 conflicts with why3 1.7.2). Re-checked locally on `moon 0.1.20261119`:
-format, check and all 146x4 tests are green, but `scripts/prove_gate.mjs`
-reports 425 goals proved with 1 timeout and fails. Treat the proof result as
-environment-sensitive and do not bump the prover without re-establishing the
-419-goal gate.
+format, check and all 146x4 tests are green; `scripts/prove_gate.mjs` at the
+default 5x budget reports 425 goals proved with 1 timeout and fails, while
+`PROVE_TIME_SCALE=10` proves all 419 goals. CI therefore uses the 10x budget.
+Treat the proof result as environment-sensitive and do not bump the prover
+without re-establishing the gate.
 
 ## Use
 
