@@ -1,5 +1,6 @@
 import {
   "huanguan-Q/textkernel/src/lib",
+  "moonbitlang/core/env",
 }
 
 pkgtype(kind: "executable")

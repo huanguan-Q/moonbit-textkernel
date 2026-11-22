@@ -57,36 +57,78 @@ pub fn str_contains(haystack : String, needle : String) -> Bool {
 }
 
 ///|
-/// Normalize asset URLs from cdn.example.com and assets.example.org by appending default params when missing: fmt=png and v=1.
-/// Also forces HTTPS for all example.org domains to prevent Mixed Content errors.
-/// If the URL does not belong to example.org configured asset hosts or already contains both params, the input is returned unchanged.
-/// Enhanced with error handling and performance optimizations.
-pub fn normalize_asset_url(input : String) -> String {
-  require_model_length(input, "normalize_asset_url")
-  // Input validation and early returns
+/// Host allow-list and default query parameters for asset URL normalization.
+///
+/// The old API hard-coded RFC 2606 example domains inside `core.mbt`, which
+/// forced every commercial consumer to fork the library. Pass an explicit
+/// config to `*_with_config` instead; the no-suffix functions keep their
+/// historical behaviour by wrapping `default_asset_config()`.
+pub struct AssetConfig {
+  hosts : Array[String]
+  default_params : Array[String]
+}
+
+///|
+/// The historical configuration: example domains and `fmt=png` / `v=1`.
+pub fn default_asset_config() -> AssetConfig {
+  {
+    hosts: ["cdn.example.com", "assets.example.org"],
+    default_params: ["fmt=png", "v=1"],
+  }
+}
+
+///|
+/// Create a configuration for a deployment without touching library source.
+pub fn create_asset_config(
+  hosts : Array[String],
+  default_params : Array[String],
+) -> AssetConfig {
+  { hosts, default_params, }
+}
+
+///|
+/// True when the input mentions any host in the configuration.
+fn config_host_matches(input : String, config : AssetConfig) -> Bool {
+  for host in config.hosts {
+    if str_contains(input, host) {
+      return true
+    }
+  }
+  false
+}
+
+///|
+/// Key part of a `key=value` query parameter, used for presence checks.
+fn param_key(param : String) -> String {
+  let mut i = 0
+  while i < param.length() {
+    match param[i].to_char() {
+      Some('=') => return param[:i].to_owned()
+      _ => ()
+    }
+    i = i + 1
+  }
+  param
+}
+
+///|
+/// Normalize an asset URL with an explicit host allow-list and default params.
+/// Hosts outside the config are returned verbatim; configured hosts are forced
+/// to HTTPS and receive any missing default query parameter.
+pub fn normalize_asset_url_with_config(
+  input : String,
+  config : AssetConfig,
+) -> String {
+  require_model_length(input, "normalize_asset_url_with_config")
   if input.length() == 0 {
     return input
   }
-
-  // Performance check for extremely long URLs
-  if input.length() > 2000 {
-    // For very long URLs, still process but could be optimized further
-    // In a real implementation, this might log a warning
-  }
-
-  // Check for any example.org configured asset host domain (asset or asset)
-  let has_asset_cdn = str_contains(input, "cdn.example.com") ||
-    str_contains(input, "assets.example.org")
-
-  if !has_asset_cdn {
+  if !config_host_matches(input, config) {
     return input
   }
 
-  // Force HTTPS for example.org domains to prevent Mixed Content errors.
-  // Only the scheme prefix is rewritten and the remainder is copied verbatim.
-  // NOTE: do NOT rebuild the tail character by character — `String::at`
-  // yields a UInt16 code unit, whose `to_string` is the decimal code point
-  // (e.g. 'm' -> "109"), which would corrupt the URL into a digit string.
+  // Only the scheme prefix is rewritten; the tail is copied verbatim.
+  // Rebuilding it from UInt16 code units would emit decimal code points.
   let mut processed = input
   let http_prefix = "http://"
   let https_prefix = "https://"
@@ -94,38 +136,41 @@ pub fn normalize_asset_url(input : String) -> String {
     processed = https_prefix + processed[http_prefix.length():].to_owned()
   }
 
-  let has_wx = str_contains(processed, "fmt=")
-  let has_tp = str_contains(processed, "v=")
-
-  // Early return if both parameters already exist
-  if has_wx && has_tp {
-    return processed
-  }
-
-  // Build suffix efficiently
   let has_q = str_contains(processed, "?")
   let mut sep = if has_q { "&" } else { "?" }
   let mut suffix = ""
-  if !has_wx {
-    suffix = suffix + sep + "fmt=png"
-    sep = "&"
-  }
-  if !has_tp {
-    suffix = suffix + sep + "v=1"
+  for param in config.default_params {
+    if !str_contains(processed, param_key(param) + "=") {
+      suffix = suffix + sep + param
+      sep = "&"
+    }
   }
   processed + suffix
 }
 
 ///|
-/// Decide referrer policy string based on whether the URL belongs to configured asset host (cdn.example.com or assets.example.org).
-/// Returns "no-referrer-when-downgrade" for configured asset host, otherwise "no-referrer".
-pub fn decide_referrer_policy(input : String) -> String {
-  if str_contains(input, "cdn.example.com") ||
-    str_contains(input, "assets.example.org") {
+/// Historical default configuration; identical to earlier releases.
+pub fn normalize_asset_url(input : String) -> String {
+  normalize_asset_url_with_config(input, default_asset_config())
+}
+
+///|
+/// Decide a Referrer-Policy from an explicit host allow-list.
+pub fn decide_referrer_policy_with_config(
+  input : String,
+  config : AssetConfig,
+) -> String {
+  if config_host_matches(input, config) {
     "no-referrer-when-downgrade"
   } else {
     "no-referrer"
   }
+}
+
+///|
+/// Historical default configuration; identical to earlier releases.
+pub fn decide_referrer_policy(input : String) -> String {
+  decide_referrer_policy_with_config(input, default_asset_config())
 }
 
 ///|
@@ -391,9 +436,33 @@ pub fn escape_attr(input : String) -> String {
 
 ///|
 /// Alias of normalize_asset_url for naming symmetry when used as a general-purpose "ensure" helper.
-/// This function may evolve to handle more configured asset host param policies while normalize_asset_url retains current behavior.
 pub fn ensure_asset_params(input : String) -> String {
   normalize_asset_url(input)
+}
+
+///|
+/// Configurable alias of normalize_asset_url_with_config.
+pub fn ensure_asset_params_with_config(
+  input : String,
+  config : AssetConfig,
+) -> String {
+  normalize_asset_url_with_config(input, config)
+}
+
+///|
+/// Result-based variant of normalize_asset_url_with_config with input validation.
+pub fn normalize_asset_url_with_config_result(
+  input : String,
+  config : AssetConfig,
+) -> Result[String, CoreError] {
+  let max_len : Int32 = 4096
+  match
+    validate_string_input(
+      "normalize_asset_url_with_config_result", input, max_len,
+    ) {
+    Ok(_) => Ok(normalize_asset_url_with_config(input, config))
+    Err(e) => Err(e)
+  }
 }
 
 ///|
@@ -416,6 +485,22 @@ pub fn decide_referrer_policy_result(
   let max_len : Int32 = 4096
   match validate_string_input("decide_referrer_policy_result", input, max_len) {
     Ok(_) => Ok(decide_referrer_policy(input))
+    Err(e) => Err(e)
+  }
+}
+
+///|
+/// Result-based variant of decide_referrer_policy_with_config.
+pub fn decide_referrer_policy_with_config_result(
+  input : String,
+  config : AssetConfig,
+) -> Result[String, CoreError] {
+  let max_len : Int32 = 4096
+  match
+    validate_string_input(
+      "decide_referrer_policy_with_config_result", input, max_len,
+    ) {
+    Ok(_) => Ok(decide_referrer_policy_with_config(input, config))
     Err(e) => Err(e)
   }
 }
@@ -462,6 +547,15 @@ pub fn ensure_asset_params_result(input : String) -> Result[String, CoreError] {
     Ok(_) => Ok(ensure_asset_params(input))
     Err(e) => Err(e)
   }
+}
+
+///|
+/// Result-based alias of ensure_asset_params_with_config.
+pub fn ensure_asset_params_with_config_result(
+  input : String,
+  config : AssetConfig,
+) -> Result[String, CoreError] {
+  normalize_asset_url_with_config_result(input, config)
 }
 
 ///|

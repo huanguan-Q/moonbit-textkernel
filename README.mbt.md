@@ -2,7 +2,7 @@
 
 A formally verified MoonBit kernel for HTML escaping, filename sanitisation,
 URL rewriting and joined-list batch operations. Zero dependencies, four
-backends, 146 tests and 419 proof goals under the CI proof gate.
+backends, 151 tests and 419 proof goals under the CI proof gate.
 
 ## Usage
 
@@ -16,12 +16,21 @@ let parts = @lib.split_joined("a|b|c", "|")
 `*_result` variants return `Result[T, CoreError]`. The shipping layer verifies
 its own output against the escape invariants before returning.
 
+Pass an explicit `AssetConfig` to `*_with_config` to replace the example-domain
+allow-list and default query params without forking. The no-suffix functions
+keep the historical defaults. The same operations are available as a CLI:
+
+```bash
+moonx huanguan-Q/textkernel@0.1.1 -- escape-html '<script>x</script>'
+moon run src/cli --target native -- sanitize-filename < names.txt
+```
+
 ## Verification
 
 Run `moon test --target all` and `node scripts/prove_gate.mjs` (10x solver
 limits in CI, 32-bit machine-integer model, 419 goals). A bare `moon prove`
 discharges 191 goals with the stock limits and may report timeouts.
-Re-verified 2026-11-22 on `moon 0.1.20261119`: 146/146 tests pass on all four
+Re-verified 2026-11-22 on `moon 0.1.20261119`: 151/151 tests pass on all four
 backends. The proved kernels live in
 `src/proof` over UTF-16 code-unit arrays; `src/proof/conform.mbt` pins them to
 the shipped `String` API over an enumerated corpus. `src/lib` is not in the

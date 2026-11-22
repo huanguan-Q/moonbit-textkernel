@@ -26,6 +26,18 @@ export function loadTextKernel(wasmPath = DEFAULT_WASM) {
       constants[imp.name] = imp.name;
     }
   }
-  const instance = new WebAssembly.Instance(module, { "_": constants });
+  // The CLI entry point adds WASI-like argv/fs imports and a console import.
+  // Business exports never call them, so stubs are enough for library hosts.
+  // Calling one is a programming error and fails loudly rather than silently.
+  const unsupported = new Proxy({}, {
+    get: (_target, name) => () => {
+      throw new Error(`textkernel Wasm host does not implement ${String(name)}`)
+    },
+  })
+  const instance = new WebAssembly.Instance(module, {
+    "_": constants,
+    "console": { log: () => {} },
+    "__moonbit_fs_unstable": unsupported,
+  });
   return instance.exports;
 }

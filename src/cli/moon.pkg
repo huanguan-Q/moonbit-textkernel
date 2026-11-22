@@ -1,0 +1,13 @@
+import {
+  "huanguan-Q/textkernel/src/lib",
+  "moonbitlang/core/env",
+  "moonbitlang/core/async/stdio",
+}
+
+supported_targets = "-all+native"
+
+pkgtype(kind: "executable")
+
+options(
+  "allow-experimental-packages": true,
+)

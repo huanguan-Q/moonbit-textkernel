@@ -10,7 +10,7 @@ set of routines for those four jobs, with the safety properties discharged by
 `moon prove` rather than by inspection.
 
 ```
-huanguan-Q/textkernel    146 tests × 4 backends    419 proof goals    13 WASM API exports (+ `_start`)    zero deps
+huanguan-Q/textkernel    151 tests × 4 backends    419 proof goals    13 WASM API exports (+ `_start`)    zero deps
 ```
 
 ## What is in the box
@@ -35,7 +35,7 @@ quietly emitting markup the caller believes is escaped.
 ```bash
 moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
-moon test --target all                    # 146/146 on each backend
+moon test --target all                    # 151/151 on each backend
 moon prove                               # 191 goals with the stock solver limits
 node scripts/prove_gate.mjs              # 419 goals, 10x solver limits in CI, machine-int model
 moon run src/demo --target native        # runnable example
@@ -65,7 +65,7 @@ Release update 2026-11-22: the dated CLI binaries for 0.1.20261104 and
 0.1.20261117 are no longer downloadable, so CI now installs the latest
 available MoonBit CLI and runs the proof job on `ubuntu-22.04` (Ubuntu 26.04's
 OCaml 5.4 conflicts with why3 1.7.2). Re-checked locally on `moon 0.1.20261119`:
-format, check and all 146x4 tests are green; `scripts/prove_gate.mjs` at the
+format, check and all 151x4 tests are green; `scripts/prove_gate.mjs` at the
 default 5x budget reports 425 goals proved with 1 timeout and fails, while
 `PROVE_TIME_SCALE=10` proves all 419 goals. CI therefore uses the 10x budget.
 Treat the proof result as environment-sensitive and do not bump the prover
@@ -84,13 +84,42 @@ let items = @lib.split_joined("a|b|c", "|")
 let out = @lib.join_joined(@lib.quick_batch_escape_htmls(items), "|")
 ```
 
-See `src/demo/main.mbt` for a complete runnable example.
+See `src/demo/main.mbt` for a complete runnable example and
+`examples/wasm-node/ssr-middleware.mjs` for an SSR/UGC consumer.
+
+## Explicit configuration and CLI
+
+Host allow-lists and default query parameters are data, not source constants:
+
+```moonbit
+let config = @lib.create_asset_config(
+  ["cdn.internal.example"],
+  ["w=800", "auto=1"],
+)
+let url = @lib.normalize_asset_url_with_config(
+  "http://cdn.internal.example/a.png",
+  config,
+)
+// https://cdn.internal.example/a.png?w=800&auto=1
+```
+
+The no-suffix functions remain wrappers around the historical RFC 2606
+configuration, so existing callers do not break.
+
+The same operations are available as a CLI with JSON-lines output:
+
+```bash
+moonx huanguan-Q/textkernel@0.1.1 -- --help
+moonx huanguan-Q/textkernel@0.1.1 -- escape-html '<script>x</script>'
+moon run src/cli --target native -- sanitize-filename < names.txt
+```
 
 ## WASM / calling from JavaScript
 
-`src/main` is a thin export shim. With `use-js-builtin-string` the linker
-exposes `String -> String` functions directly to a JS host — no linear-memory
-ABI, no manual allocation, no UTF-8 copy:
+`src/main` is an export shim plus a small CLI entry point. With
+`use-js-builtin-string` the linker exposes `String -> String` functions
+directly to a JS host — no linear-memory ABI, no manual allocation, no UTF-8
+copy:
 
 | Single value | Joined-list batch (`joined`, `sep`) |
 |---|---|
@@ -99,7 +128,7 @@ ABI, no manual allocation, no UTF-8 copy:
 | `escape_html_safe`, `escape_attr_safe`, `sanitize_filename_safe` | — never-fail variants |
 
 ```bash
-node scripts/build_wasm.mjs        # ~9.6 KB artefact, verifies 13 API exports (+ `_start`)
+node scripts/build_wasm.mjs        # ~23 KB artefact after the CLI entry point; verifies 13 API exports (+ `_start`)
 node examples/wasm-node/demo.mjs   # assertions across all 13 API exports
 node examples/wasm-node/render.mjs # realistic downstream consumer
 ```
@@ -206,6 +235,13 @@ executable that calls `escape_html` N times over a string grown by doubling
 that only measures `input.length()` to remove process startup, and use the
 identical harness before and after a change. The numbers are a regression
 guard, not a promise: absolute throughput depends on the backend and host.
+
+## Evidence and further reading
+
+- `docs/BENCHMARK.md` — recorded native timings and reproduction method.
+- `docs/PROOF-REPORT.md` — what the proof gates establish and where the trusted seam is.
+- `docs/ABI-EVALUATION.md` — why the current Wasm artefact needs JS string builtins and the proposed WASI path.
+- `SKILL.md` — agent-facing command reference.
 
 ## Provenance & License
 
