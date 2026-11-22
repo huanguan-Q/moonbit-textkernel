@@ -109,10 +109,13 @@ configuration, so existing callers do not break.
 The same operations are available as a CLI with JSON-lines output:
 
 ```bash
-moonx huanguan-Q/textkernel@0.1.1 -- --help
-moonx huanguan-Q/textkernel@0.1.1 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.2 -- --help
+moonx huanguan-Q/textkernel/src/main@0.1.2 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename < names.txt
 ```
+
+Use the explicit `src/main` package path for moonx: the bare module coordinate
+has no prebuilt Wasm asset on mooncakes.io.
 
 ## WASM / calling from JavaScript
 

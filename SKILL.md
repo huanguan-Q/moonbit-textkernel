@@ -25,12 +25,15 @@ resource limiting: see Boundaries below.
 ## Run the Wasm / moonx command
 
 ```bash
-moonx huanguan-Q/textkernel@0.1.1 -- --help
-moonx huanguan-Q/textkernel@0.1.1 -- escape-html '<script>x</script>'
-moonx huanguan-Q/textkernel@0.1.1 -- normalize-asset-url \
+moonx huanguan-Q/textkernel/src/main@0.1.2 -- --help
+moonx huanguan-Q/textkernel/src/main@0.1.2 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.2 -- normalize-asset-url \
   --hosts cdn.example.com --params fmt=png,v=1 \
   'http://cdn.example.com/a.png'
 ```
+
+Use the explicit `src/main` package path: mooncakes.io builds the prebuilt Wasm
+asset for that package, while the bare module coordinate has none.
 
 Each command prints one JSON line with `command` and `output`, or `command`
 and `error`. `--hosts` and `--params` take comma-separated values; omitting
