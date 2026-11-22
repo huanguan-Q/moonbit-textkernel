@@ -35,6 +35,10 @@
 // runtime. Set `PROVE_TIME_SCALE` to change the multiplier (default 5 => 25 s
 // default, 5 s and 10 s per call).
 //
+// Newer CLIs emit a Z3-only strategy, which times out on CI runners even with
+// a modern Z3. `scripts/why3_dual_solver.mjs` rebuilds the locally verified
+// Alt-Ergo + Z3 structure from the generated config before limits are scaled.
+//
 // Finally, the gate proves against the **machine-integer** prelude, not the
 // stock math-integer one. `moon` ships two models for `Int32`:
 //
@@ -65,6 +69,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const MOONBIT = ROOT;
 const VERIF = join(MOONBIT, "_build", "verif");
 const GENERATED = join(VERIF, "why3.conf");
+const DUAL = join(VERIF, "why3.dual.conf");
 const DERIVED = join(VERIF, "why3.local.conf");
 const SCALE = Number(process.env.PROVE_TIME_SCALE ?? "5");
 
@@ -140,9 +145,23 @@ function attempt(args) {
 }
 
 function derive(reason) {
+  // Newer CLIs generate a Z3-only strategy, which times out on CI runners.
+  // Rebuild the verified dual-solver structure first, then scale its limits.
+  const dual = spawnSync(
+    process.execPath,
+    [join(ROOT, "scripts", "why3_dual_solver.mjs"), "--from", GENERATED, "--to", DUAL],
+    { encoding: "utf8" },
+  );
+  process.stdout.write(dual.stdout ?? "");
+  if (dual.status !== 0) {
+    process.stderr.write(dual.stderr ?? "");
+    console.error(`[prove] could not derive a dual-solver Why3 config (${reason})`);
+    process.exit(1);
+  }
+
   const res = spawnSync(
     process.execPath,
-    [join(ROOT, "scripts", "why3_conf.mjs"), "--from", GENERATED, "--to", DERIVED, "--scale", String(SCALE)],
+    [join(ROOT, "scripts", "why3_conf.mjs"), "--from", DUAL, "--to", DERIVED, "--scale", String(SCALE)],
     { encoding: "utf8" },
   );
   process.stdout.write(res.stdout ?? "");
