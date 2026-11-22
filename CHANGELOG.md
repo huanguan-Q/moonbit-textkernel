@@ -13,6 +13,16 @@ API change.
 
 - Planned: WASI/JSON-lines command package for non-JS hosts, subject to demand.
 
+## [0.1.4] - 2026-11-23
+
+### Fixed
+
+- Republished the mooncakes skill so its bundle contains the 0.1.3 changelog
+  entry and the skills badge/link that were added to the repository after
+  `huanguan-Q/textkernel@0.1.3` was published. The old skill version is
+  immutable; 0.1.4 is the corrected bundle.
+- Updated all documented `moonx` coordinates and badges to 0.1.4.
+
 ## [0.1.3] - 2026-11-23
 
 ### Added

@@ -4,8 +4,8 @@
 [![proof](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=proof)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
 [![wasm](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=wasm)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
 [![compat](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml/badge.svg?branch=main&job=compat)](https://github.com/huanguan-Q/moonbit-textkernel/actions/workflows/ci.yml)
-[![mooncakes](https://img.shields.io/badge/mooncakes-0.1.3-blue)](https://mooncakes.io/docs/huanguan-Q/textkernel)
-[![skills](https://img.shields.io/badge/mooncakes%20skills-0.1.3-purple)](https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.3)
+[![mooncakes](https://img.shields.io/badge/mooncakes-0.1.4-blue)](https://mooncakes.io/docs/huanguan-Q/textkernel)
+[![skills](https://img.shields.io/badge/mooncakes%20skills-0.1.4-purple)](https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.4)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
 **A small, formally verified MoonBit kernel for text that crosses a trust boundary.**
@@ -117,8 +117,8 @@ configuration, so existing callers do not break.
 The same operations are available as a CLI with JSON-lines output:
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.1.3 -- --help
-moonx huanguan-Q/textkernel/src/main@0.1.3 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.4 -- --help
+moonx huanguan-Q/textkernel/src/main@0.1.4 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename < names.txt
 ```
 
@@ -253,7 +253,7 @@ guard, not a promise: absolute throughput depends on the backend and host.
 - `docs/FORMAL-VERIFICATION-ARTICLE.md` — a reproducible walkthrough of the proof design.
 - `docs/ABI-EVALUATION.md` — why the current Wasm artefact needs JS string builtins and the proposed WASI path.
 - `docs/TOOLCHAIN-PIN.md` — why the CI compatibility pin is a repository variable.
-- Mooncakes Skills entry: <https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.3>.
+- Mooncakes Skills entry: <https://mooncakes.io/skills/huanguan-Q/textkernel@0.1.4>.
 - `SKILL.md` — agent-facing command reference.
 - `docs/API-STABILITY.md` — SemVer contract and stable API surface.
 - `CHANGELOG.md` — release history.

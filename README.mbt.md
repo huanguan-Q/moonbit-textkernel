@@ -21,7 +21,7 @@ allow-list and default query params without forking. The no-suffix functions
 keep the historical defaults. The same operations are available as a CLI:
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.1.3 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.1.4 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename < names.txt
 ```
 
