@@ -6,10 +6,16 @@ target/
 *.coverage
 bisect.coverage
 
-# Editor / OS
+# Editor / OS / local agent data
 .DS_Store
 .idea/
 .vscode/
+.claude/
+.workbuddy/
+
+# Local dependency caches
+node_modules/
+__pycache__/
 
 # Credentials and local logs
 .env
