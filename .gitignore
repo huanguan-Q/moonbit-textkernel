@@ -5,6 +5,8 @@ target/
 *.generated.mbti
 *.coverage
 bisect.coverage
+# `moon prove` writes an internal trace here; it embeds absolute local paths
+/trace.json
 
 # Editor / OS / local agent data
 .DS_Store
