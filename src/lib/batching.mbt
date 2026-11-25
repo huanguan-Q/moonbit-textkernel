@@ -72,22 +72,55 @@ fn batch_end(start : Int32, size : Int32, total : Int32) -> Int32 {
 }
 
 ///|
+/// The chunk size the shipped loop runs with.
+///
+/// It keeps the loop inside the domain its arithmetic was proved on, so that
+/// every `proof_require` of `batch_ceil` and `batch_end` in `src/proof/batch.mbt`
+/// holds where they are called:
+///
+///   precondition                       guaranteed by
+///   `0 <= n`, `n <= MAX_CODE_UNITS`    `n` is `total`; a list above the bound
+///                                      is not split at all
+///   `0 < bs`, `bs <= MAX_CODE_UNITS`   `safe_batch_size`, and then `bs <= n`
+///                                      whenever the list is split
+///
+/// A list of more than `MAX_CODE_UNITS` items cannot be allocated in practice.
+/// If it could, one chunk would cover it and the arithmetic would never run.
+/// Before this bound existed, a chunk size near `Int32` max made
+/// `(total + size - 1)` overflow and the loop silently dropped every item.
+fn bounded_batch_size(requested : Int32, total : Int32) -> Int32 {
+  let positive = safe_batch_size(requested)
+  if positive > total || total > MAX_INPUT_CODE_UNITS {
+    total
+  } else {
+    positive
+  }
+}
+
+///|
 /// Apply `operation` to every item in bounded chunks.
 ///
-/// No item is dropped or repeated regardless of the configured chunk size —
-/// this is what `conform.mbt` asserts against the proved arithmetic.
+/// No item is dropped or repeated, whatever the configured chunk size — this is
+/// what `conform.mbt` asserts against the proved arithmetic, including for a
+/// chunk size of `Int32` max.
 pub fn[T, R] batch_process_custom(
   items : Array[T],
   operation : (T) -> R,
   config : BatchConfig,
 ) -> BatchResult[R] {
-  let size = safe_batch_size(config.batch_size)
-  let count = batch_ceil(items.length(), size)
+  let total = items.length()
   let results : Array[R] = []
+  if total == 0 {
+    return { results, processed_count: 0, failed_count: 0, }
+  }
+  let size = bounded_batch_size(config.batch_size, total)
+  // One chunk covers the whole list unless `size` is smaller than it. The
+  // proved arithmetic is only consulted when `size < total <= MAX_CODE_UNITS`.
+  let count = if size >= total { 1 } else { batch_ceil(total, size) }
   let mut processed = 0
   for batch_index = 0; batch_index < count; batch_index = batch_index + 1 {
     let start = batch_index * size
-    let end = batch_end(start, size, items.length())
+    let end = batch_end(start, size, total)
     let mut i = start
     while i < end {
       results.push(operation(items[i]))
