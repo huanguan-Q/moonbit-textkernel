@@ -17,12 +17,10 @@ merging is deliberately explicit.
 ```bash
 git clone https://github.com/huanguan-Q/moonbit-textkernel.git
 cd moonbit-textkernel
-pre-commit install --hook-type pre-commit --hook-type pre-push
 ```
 
-The repository uses pinned commit SHAs for pre-commit hooks and a local
-`.leak-guard/` directory for the whitelist/PII guards. Never use
-`git add .` or `git add -A`; stage explicit paths.
+Stage explicit paths rather than `git add .` or `git add -A`, so that local
+files are never committed by accident.
 
 ## Required gates
 

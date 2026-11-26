@@ -8,12 +8,12 @@ bisect.coverage
 # `moon prove` writes an internal trace here; it embeds absolute local paths
 /trace.json
 
-# Editor / OS / local agent data
+# Editor / OS / local tool state
 .DS_Store
 .idea/
 .vscode/
-.claude/
 .workbuddy/
+.pre-commit-config.yaml
 
 # Local dependency caches
 node_modules/
@@ -30,8 +30,6 @@ __pycache__/
 id_rsa*
 id_ed25519*
 Thumbs.db
-.cursor/
-.specstory/
 .venv/
 venv/
 *.sqlite
