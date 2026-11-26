@@ -71,7 +71,8 @@ repos:
 
   # ---------- 路径白名单守卫(本技能自带)----------
   # 注意: .leak-guard/ 是本地防线,默认不提交。新机器需先运行:
-  #   bash ~/.workbuddy/skills/oss-leak-review/scripts/install-hooks.sh .
+  #   bash <oss-leak-review 技能目录>/scripts/install-hooks.sh .
+  # 以及把本地的 conversation-guard.sh 放回 .leak-guard/(它不在技能里,自行留存)。
   - repo: local
     hooks:
       - id: allowlist-guard
@@ -87,3 +88,38 @@ repos:
         language: system
         pass_filenames: false
         always_run: true
+
+  # ---------- 对话工作内容零公开守卫 ----------
+  # 与 AI 协作时产生的资料、报告、日志与决策叙述,不得进入任何公开载体。
+  # 上面那些钩子查的是"内容里有没有密钥/PII";这一组查的是"东西是怎么来的":
+  # 一份 .md 可以没有任何密钥,但它是对话产物,就不能公开。
+  # 注意: 本文件会被文字层扫描,所以这里的注释【不要】写出具体产物名,否则会拦住自己。
+  # 三个阶段各一道,缺一道就有一类漏法:
+  #   pre-commit  暂存内容的路径与新增行
+  #   commit-msg  提交说明(推送后无法单独修改,只能在这里拦)
+  #   pre-push    待推送的全部提交(pre-commit 可被 --no-verify 绕过,这里是最后一道)
+  - repo: local
+    hooks:
+      - id: conversation-guard-staged
+        name: 对话产物守卫 · 暂存内容
+        entry: bash .leak-guard/conversation-guard.sh staged
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-commit]
+
+      - id: conversation-guard-message
+        name: 对话产物守卫 · 提交说明
+        entry: bash .leak-guard/conversation-guard.sh message
+        language: system
+        pass_filenames: true
+        always_run: true
+        stages: [commit-msg]
+
+      - id: conversation-guard-push
+        name: 对话产物守卫 · 待推送提交
+        entry: bash .leak-guard/conversation-guard.sh push
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
