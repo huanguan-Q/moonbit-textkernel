@@ -67,13 +67,14 @@ cd moonbit-textkernel
 moon fmt --check
 moon check --target all --deny-warn
 moon test --target all
-moon prove                       # 191 goals，stock limits
-node scripts/prove_gate.mjs      # 419 goals，默认 5x
+moon prove                       # 207 goals，stock 限额，另有 3 个超时
+node scripts/prove_gate.mjs      # 全部目标，默认 5x
 PROVE_TIME_SCALE=10 node scripts/prove_gate.mjs
 ```
 
-在 CI 的 dual-solver 配置下，最后一条命令应报告
-`1 of 1 packages proved` 与 `419 goals proved`。
+在 CI 的 dual-solver 配置下，最后一条命令应报告 `1 of 1 packages proved`，
+且没有任何未证目标。它报告的目标数是 355 或 488，取决于拆分路径，不是契约。
+门禁才是结论：stock 限额下的结果取决于求解器时机，出现超时不等于回归。
 
 ## 7. 可迁移的经验
 
@@ -83,5 +84,11 @@ PROVE_TIME_SCALE=10 node scripts/prove_gate.mjs
 4. **验证验证器**：门禁要拒绝 skipped package、vacuous denominator 和 timeout。
 5. **固定求解器环境**：CLI 版本、Z3 版本、策略配置都要进入可复现脚本。
 6. **诚实陈述边界**：证明覆盖的是内核，不是整个应用，也不是性能。
+
+后来修订规约时又得到三条经验：
+
+7. **规约也会写错**：第一版转义规约把代理区间内的所有码元都替换成 `_`。证明、实现、测试三者完全一致，emoji 却变成了 `__`。证明的是"实现符合规约"，不是"规约符合需求"。修正后，"合法代理对原样保留、只有孤立的一半才替换"写进了 `html_at` / `attr_at` 并重新证明。
+8. **前置条件要有运行时镜像**：`batch_ceil` 只在 `bs <= MAX_CODE_UNITS` 时有证明，出货层却曾经传入任意 `Int32`。接近上限的批大小让 `(total + size - 1)` 溢出，整批数据被静默丢弃。现在出货层先把批大小钳制到已证范围内。每条 `proof_require` 都应能在出货代码里指出对应的检查。
+9. **让每条 VC 只做一件事**：把"点号的位置""尾部是否相等""两者合取"放进同一个内核时，求解器在最后一条路径上发散，尽管那条路径只是假设的命题推论。拆成三个各做一次比较的内核后，所有路径毫秒级收敛。另外，循环条件必须是单一的不等式，否则工具推不出递减量，终止性义务永远关不上。
 
 完整的证明范围说明见 `docs/PROOF-REPORT.md`，性能数据见 `docs/BENCHMARK.md`。

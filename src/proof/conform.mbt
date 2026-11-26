@@ -11,8 +11,14 @@
 // asserted case by case over an enumerated corpus at the bottom of this file.
 //
 // The conversion itself is the trusted seam. It is two lines long, and the only
-// thing it relies on is that `String::at` yields the UTF-16 code unit that the
-// JS fallback in `wasmLoader.js` also sees via `charCodeAt`.
+// thing it relies on is that `String::at` yields the UTF-16 code unit — the
+// same unit a JS host sees through `charCodeAt`.
+//
+// One limit of the bridge cannot be worked around here: a *lone* surrogate half
+// cannot be written in a MoonBit string literal, so no corpus can carry one
+// through the shipped `String` functions. The kernels are driven on raw code
+// units instead (see the lone-half tests below), and the WASM exports are
+// exercised from a JS host in `examples/wasm-node/demo.mjs`.
 
 ///|
 /// UTF-16 code units of `s`, widened to `Int` so the kernels can use them.
@@ -73,16 +79,76 @@ fn codes_equal_prefix(
 ///|
 /// Does the verified `sanitize_filename` kernel agree with `@lib.sanitize_filename`?
 ///
-/// Covers the `""` -> `"file"` default (via `default_name_codes`) and the
-/// 120-code-unit clamp (`NAME_LIMIT`) exactly as the shipped code applies them.
+/// Covers the `""` -> `"file"` default, the dot-only rule, the character rule
+/// and the 120-code-unit clamp (`NAME_LIMIT`) exactly as the shipped code
+/// applies them.
+///
+/// The equality is a real constraint only where the two Windows-only rules of
+/// the shipped sanitizer are the identity: nothing to rewrite at the end, and
+/// no device name to mark. Elsewhere this returns `true`, and that `true` is
+/// **vacuous** — it records "no claim", not "agreement".
+/// `sanitize_platform_rules_are_identity` tells the two apart, and a corpus
+/// test partitions its cases for that reason. On the names where the bridge
+/// abstains, the runtime invariant `@lib.filename_is_sanitized` is what holds.
 pub fn conform_sanitize(name : String) -> Bool {
-  let shipped = codes_of_string(@lib.sanitize_filename(name))
-  let kernel = if name.length() == 0 {
-    default_name_codes(NAME_LIMIT)
+  let base = if name.length() == 0 { "file" } else { name }
+  let kernel = sanitize_name_codes(codes_of_string(base), NAME_LIMIT)
+  if sanitize_platform_rules_are_identity(kernel) {
+    codes_equal(codes_of_string(@lib.sanitize_filename(name)), kernel)
   } else {
-    sanitize_codes(codes_of_string(name), NAME_LIMIT)
+    true
   }
-  codes_equal(shipped, kernel)
+}
+
+///|
+/// Would the Windows-only rules of the shipped sanitizer leave this name alone?
+pub fn sanitize_platform_rules_are_identity(name : FixedArray[Int32]) -> Bool {
+  name.length() > 0 &&
+  !codes_end_with_dot_or_space(name) &&
+  !codes_have_device_stem(name)
+}
+
+///|
+/// Does `name` end with a dot or a space? The shipped sanitizer rewrites both.
+fn codes_end_with_dot_or_space(name : FixedArray[Int32]) -> Bool {
+  let n = name.length()
+  n > 0 && (name[n - 1] == CH_DOT || name[n - 1] == CH_SPACE)
+}
+
+///|
+/// Is the stem of `name` — the text before its first dot, without trailing
+/// spaces — a Windows device name? The shipped sanitizer marks such a stem.
+fn codes_have_device_stem(name : FixedArray[Int32]) -> Bool {
+  let n = name.length()
+  let mut stem_end = n
+  for i = 0; i < n; i = i + 1 {
+    if name[i] == CH_DOT {
+      stem_end = i
+      break
+    }
+  }
+  while stem_end > 0 && name[stem_end - 1] == CH_SPACE {
+    stem_end = stem_end - 1
+  }
+  let devices : Array[String] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7",
+    "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7", "lpt8",
+    "lpt9", "conin$", "conout$",
+  ]
+  for device in devices {
+    if stem_end == device.length() {
+      let mut same = true
+      for j = 0; j < device.length(); j = j + 1 {
+        if ascii_lower_codes(name[j]) != device[j].to_int() {
+          same = false
+        }
+      }
+      if same {
+        return true
+      }
+    }
+  }
+  false
 }
 
 ///|
@@ -120,18 +186,72 @@ pub fn conform_escape_attr(input : String) -> Bool {
 /// 2026-10-30 — admitted non-asset host URLs, where the gate fires and the shipped
 /// output keeps its `http://` while the kernel rewrites it.
 ///
-/// The asset host test is deliberately the same `str_contains` substring probe the
-/// shipped function uses, quirks included: this predicate has to describe the
-/// code that ships, not an idealised URL parser. Tightening it (say, to a real
-/// host parse) would make the bridge check a different function from the one in
-/// `src/lib`.
+/// The host test is the shipped one: this predicate has to describe the code
+/// that ships, not an idealised URL parser. While the gate was a substring
+/// probe it was the same `str_contains` call the shipped function made, quirks
+/// included; `https_inadmissible_cases` keeps such a URL as a counterexample.
 pub fn https_applicable(input : String) -> Bool {
-  let has_asset_cdn = @lib.str_contains(input, "cdn.example.com") ||
-    @lib.str_contains(input, "assets.example.org")
   input.has_prefix("http://") &&
-  has_asset_cdn &&
-  @lib.str_contains(input, "fmt=") &&
-  @lib.str_contains(input, "v=")
+  @lib.decide_referrer_policy(input) == "no-referrer-when-downgrade" &&
+  conform_query_has_key(input, "fmt") &&
+  conform_query_has_key(input, "v")
+}
+
+///|
+/// Index of the first `c` in `s` at or after `from`, or -1.
+fn conform_index_from(s : String, c : Char, from : Int32) -> Int32 {
+  let mut i = from
+  while i < s.length() {
+    if s[i].to_char() == Some(c) {
+      return i
+    }
+    i = i + 1
+  }
+  -1
+}
+
+///|
+/// Does the query of `url` carry a parameter named `key`?
+///
+/// Parameters are separated by `&`, and a parameter's name is the text before
+/// its first `=`. Written out here so the bridge states its own domain instead
+/// of borrowing a private helper from `src/lib`.
+fn conform_query_has_key(url : String, key : String) -> Bool {
+  let query_start = conform_index_from(url, '?', 0)
+  if query_start < 0 {
+    return false
+  }
+  let mut query_end = url.length()
+  let hash = conform_index_from(url, '#', query_start + 1)
+  if hash >= 0 {
+    query_end = hash
+  }
+  let mut found = false
+  let mut start = query_start + 1
+  let mut i = start
+  while i <= query_end {
+    if i == query_end || url[i] == '&' {
+      // The parameter is url[start:i).
+      let mut name_end = start
+      while name_end < i && url[name_end] != '=' {
+        name_end = name_end + 1
+      }
+      if name_end - start == key.length() {
+        let mut same = true
+        for j = 0; j < key.length(); j = j + 1 {
+          if url[start + j] != key[j] {
+            same = false
+          }
+        }
+        if same {
+          found = true
+        }
+      }
+      start = i + 1
+    }
+    i = i + 1
+  }
+  found
 }
 
 ///|
@@ -167,12 +287,14 @@ pub fn conform_https(input : String) -> Bool {
 
 ///|
 /// Characters chosen to hit every branch of every kernel: all nine illegal
-/// filename characters, `_`, ASCII, a BMP CJK character, and a non-BMP emoji
-/// (a well-formed surrogate pair, i.e. two lone halves at the code-unit level).
+/// filename characters, `_`, ASCII, a BMP CJK character, a non-BMP emoji
+/// (a well-formed surrogate pair: two code units, one character), and two
+/// characters from above the surrogate block (U+E000 and U+FFFD). Those two
+/// take a different route in the shipped escaper from the ones below it.
 fn conform_alphabet() -> Array[String] {
   [
     "a", "Z", "9", " ", "_", "/", "\\", ":", "*", "?", "\"", "<", ">", "|", "文",
-    "😀",
+    "😀", "\u{E000}", "\u{FFFD}",
   ]
 }
 
@@ -248,11 +370,144 @@ test "conform - sanitize agrees around the 120-code-unit clamp" {
 
 ///|
 test "conform - sanitize agrees on a surrogate pair" {
-  // A non-BMP character is two code units, both inside the surrogate block, so the
-  // shipped `UInt16::to_char()` yields `None` twice and both halves become `_`.
-  assert_eq(@lib.sanitize_filename("😀"), "__")
+  // A non-BMP character is two code units, a leading and a trailing
+  // surrogate. Both are kept: it is one character.
+  assert_eq(@lib.sanitize_filename("😀"), "😀")
   let cases : Array[String] = ["😀", "a😀b", "😀/", "/😀", "文😀文"]
   assert_eq(conform_first_bad(cases, conform_sanitize), -1)
+}
+
+///|
+test "conform - sanitize agrees around the clamp when a pair straddles it" {
+  // 118 units and a pair make exactly 120: the character fits. With one unit
+  // more in front of it, it does not, and the name stops before the pair
+  // instead of cutting it in half.
+  let cases : Array[String] = [
+    conform_repeat("x", 118) + "😀",
+    conform_repeat("x", 118) + "😀tail",
+    conform_repeat("x", 119) + "😀",
+    conform_repeat("x", 119) + "😀tail",
+    conform_repeat("x", 117) + "😀" + "y",
+  ]
+  assert_eq(conform_first_bad(cases, conform_sanitize), -1)
+  assert_eq(
+    @lib.sanitize_filename(conform_repeat("x", 119) + "😀").length(),
+    119,
+  )
+}
+
+///|
+test "conform - the sanitizer bridge abstains exactly where a platform rule applies" {
+  // On these the kernel is a real constraint.
+  let plain : Array[String] = [
+    "abc",
+    "文档V1",
+    "a/b",
+    "😀x",
+    "...x",
+    ".hidden",
+    "a.b",
+    "console.txt",
+    "com10",
+    "x" + conform_repeat("/", 130),
+  ]
+  // On these the shipped code goes beyond the kernel.
+  let platform : Array[String] = [
+    "a.", "a ", ". ", "CON", "nul.txt", "con .txt", "LPT9 ", "aux.",
+  ]
+  for name in plain {
+    let kernel = sanitize_name_codes(codes_of_string(name), NAME_LIMIT)
+    assert_true(sanitize_platform_rules_are_identity(kernel))
+  }
+  for name in platform {
+    let kernel = sanitize_name_codes(codes_of_string(name), NAME_LIMIT)
+    assert_false(sanitize_platform_rules_are_identity(kernel))
+  }
+  // ... so the equality holds wherever it is claimed, and wherever it is not,
+  // the runtime invariant is what vouches for the shipped result.
+  assert_eq(conform_first_bad(plain, conform_sanitize), -1)
+  for name in platform {
+    assert_true(@lib.filename_is_sanitized(@lib.sanitize_filename(name)))
+  }
+}
+
+///|
+/// `[😀, '<', a lone leading half, 'a', a lone trailing half]`.
+///
+/// A lone surrogate half cannot be written in a MoonBit string literal, so the
+/// kernels are driven on raw code units.
+fn codes_with_lone_halves() -> FixedArray[Int32] {
+  let out = FixedArray::make(6, 0)
+  out[0] = 0xD83D
+  out[1] = 0xDE00
+  out[2] = '<'.to_int()
+  out[3] = 0xD83D
+  out[4] = 'a'.to_int()
+  out[5] = 0xDC00
+  out
+}
+
+///|
+test "conform - the escaper kernels keep a pair and replace an unpaired half" {
+  let src = codes_with_lone_halves()
+  let dst = FixedArray::make(src.length() * 5, 0)
+  let written = escape_html_codes(src, dst)
+  // `😀` (2) + `&lt;` (4) + `_` + `a` + `_`
+  assert_eq(written, 9)
+  assert_eq(dst[0], 0xD83D)
+  assert_eq(dst[1], 0xDE00)
+  assert_eq(dst[2], '&'.to_int())
+  assert_eq(dst[5], ';'.to_int())
+  assert_eq(dst[6], '_'.to_int())
+  assert_eq(dst[7], 'a'.to_int())
+  assert_eq(dst[8], '_'.to_int())
+  // The attribute kernel makes the same decision about surrogates.
+  let adst = FixedArray::make(src.length() * 6, 0)
+  let awritten = escape_attr_codes(src, adst)
+  assert_eq(awritten, 9)
+  assert_eq(adst[0], 0xD83D)
+  assert_eq(adst[1], 0xDE00)
+  assert_eq(adst[6], '_'.to_int())
+  assert_eq(adst[8], '_'.to_int())
+  // Two leading halves followed by a trailing one: only the second leading
+  // half is paired.
+  let two = FixedArray::make(3, 0)
+  two[0] = 0xD83D
+  two[1] = 0xD83D
+  two[2] = 0xDE00
+  assert_true(paired_codes(two, 1))
+  assert_false(paired_codes(two, 0))
+  assert_true(paired_codes(two, 2))
+}
+
+///|
+test "conform - the sanitizer kernel keeps a pair and replaces an unpaired half" {
+  let out = sanitize_name_codes(codes_with_lone_halves(), NAME_LIMIT)
+  // `😀`, `_` for `<`, `_`, `a`, `_`
+  assert_eq(out.length(), 6)
+  assert_eq(out[0], 0xD83D)
+  assert_eq(out[1], 0xDE00)
+  assert_eq(out[2], '_'.to_int())
+  assert_eq(out[3], '_'.to_int())
+  assert_eq(out[4], 'a'.to_int())
+  assert_eq(out[5], '_'.to_int())
+  // Control characters: NUL, the last C0 control and DEL are replaced, a
+  // space is not.
+  let controls = FixedArray::make(6, 0)
+  controls[1] = 'a'.to_int()
+  controls[2] = 0x1F
+  controls[3] = 'b'.to_int()
+  controls[4] = 0x7F
+  controls[5] = ' '.to_int()
+  let kept = sanitize_name_codes(controls, NAME_LIMIT)
+  for i = 0; i < kept.length(); i = i + 1 {
+    let want = if i == 1 || i == 3 || i == 5 {
+      controls[i]
+    } else {
+      '_'.to_int()
+    }
+    assert_eq(kept[i], want)
+  }
 }
 
 ///|
@@ -636,24 +891,69 @@ test "conform - the substring kernel is not a constant" {
 }
 
 // ---------------------------------------------------------------------------
-// Referrer policy
+// Referrer policy and the host rule
 //
-// `decide_referrer_policy` is the other consumer of the host gate: the same two
-// substring probes decide which `Referrer-Policy` value an image request gets.
-// The kernel proves the decision is exactly "hay contains either host"; the
-// corpus below pins the two host strings and the two literals, which is the
+// `decide_referrer_policy` applies the host rule of the allow-list and maps
+// the answer onto one of two header values. The kernels prove the pieces —
+// the scheme test, where the authority ends, where the host starts, and the
+// host rule itself; the corpora below compose them against the shipped
+// functions and pin the two host strings and the two literals, which is the
 // part a proof cannot see.
+//
+// Each case states the host of its URL next to the URL. Taking the host out of
+// a URL is the shipped parser's job, so it is written down rather than
+// re-derived by a second copy of the parser. The composition test at the end
+// is the exception: it re-derives the host with the proved kernels.
 // ---------------------------------------------------------------------------
 
 ///|
-/// Does the shipped policy match the verified decision for this input?
-pub fn conform_referrer(input : String) -> Bool {
-  let downgrade = referrer_downgrade_codes(
-    codes_of_string(input),
+/// (URL, host as the shipped parser takes it).
+fn conform_url_hosts() -> Array[(String, String)] {
+  [
+    // asset hosts
+    ("https://cdn.example.com/asset_png/abc/0?fmt=png", "cdn.example.com"),
+    ("https://assets.example.org/asset_jpg/abc/0", "assets.example.org"),
+    ("http://cdn.example.com/a.png", "cdn.example.com"),
+    ("https://cdn.example.com/a/😀.png?fmt=png&v=1", "cdn.example.com"),
+    ("https://sub.cdn.example.com/a.png", "sub.cdn.example.com"),
+    // a DNS name has no letter case
+    ("https://CDN.EXAMPLE.COM/a.png", "CDN.EXAMPLE.COM"),
+    // user information and a port are not part of the host
+    ("https://user@cdn.example.com:8080/a.png", "cdn.example.com"),
+    // a backslash ends the authority, as it does in a browser
+    ("https://cdn.example.com\\@evil.com/a.png", "cdn.example.com"),
+    // the host rule is exact. Each of these passed the substring probe.
+    ("https://example.com/cdn.example.com/a.png", "example.com"),
+    ("https://cdn.example.com.evil.com/a.png", "cdn.example.com.evil.com"),
+    ("https://cdn.example.com@evil.com/a.png", "evil.com"),
+    (
+      "https://assets.example.org.example.com/a.png", "assets.example.org.example.com",
+    ),
+    ("https://example.com/?u=cdn.example.com", "example.com"),
+    // a near miss, a non-asset host, and inputs that are not http(s) URLs
+    ("https://cdn.example/a.png", "cdn.example"),
+    ("https://example.com/a.png", "example.com"),
+    ("cdn.example.com", ""),
+    ("ftp://cdn.example.com/a.png", "cdn.example.com"),
+    ("", ""),
+  ]
+}
+
+///|
+/// Does the shipped policy match the verified decision for this URL?
+///
+/// The decision is "an http(s) URL whose host passes the host rule". The
+/// scheme and the host are decided by kernels; the host itself is taken from
+/// the corpus, see above.
+pub fn conform_referrer(input : String, host : String) -> Bool {
+  let src = codes_of_string(input)
+  let is_http = scheme_is_http_codes(src) || scheme_is_https_codes(src)
+  let allowed = referrer_downgrade_codes(
+    codes_of_string(host),
     codes_of_string("cdn.example.com"),
     codes_of_string("assets.example.org"),
   )
-  let expected = if downgrade {
+  let expected = if is_http && allowed {
     "no-referrer-when-downgrade"
   } else {
     "no-referrer"
@@ -663,20 +963,10 @@ pub fn conform_referrer(input : String) -> Bool {
 
 ///|
 test "conform - referrer policy agrees with the kernel on the corpus" {
-  let cases : Array[String] = [
-    // both hosts, in the shapes the extension actually sees
-    "https://cdn.example.com/asset_png/abc/0?fmt=png", "https://assets.example.org/asset_jpg/abc/0",
-    "http://cdn.example.com/a.png", "https://cdn.example.com/a/😀.png?fmt=png&v=1",
-    // the gate is a substring probe, not a host parse: these two are the
-    // quirks it inherits, pinned so a future "fix" has to be deliberate
-     "https://example.com/cdn.example.com/a.png", "https://cdn.example.com.evil.com/a.png",
-    // near misses and non-asset host
-     "", "cdn.example", "cdn.example.com.evil", "https://example.com/a.png", "https://CDN.EXAMPLE.COM/a.png",
-    "mmeco.example.org/a.png", "https://assets.example.org.example.com/a.png",
-  ]
+  let cases = conform_url_hosts()
   let mut bad = -1
   for i = 0; i < cases.length(); i = i + 1 {
-    if !conform_referrer(cases[i]) {
+    if !conform_referrer(cases[i].0, cases[i].1) {
       bad = i
       break
     }
@@ -688,8 +978,6 @@ test "conform - referrer policy agrees with the kernel on the corpus" {
 test "conform - the referrer decision is not a constant" {
   // Both branches must be reachable, otherwise the corpus above could pass with
   // a function that always answers the same literal.
-  assert_true(conform_referrer("https://cdn.example.com/a.png"))
-  assert_true(conform_referrer("https://example.com/a.png"))
   assert_eq(
     @lib.decide_referrer_policy("https://cdn.example.com/a.png"),
     "no-referrer-when-downgrade",
@@ -698,6 +986,70 @@ test "conform - the referrer decision is not a constant" {
     @lib.decide_referrer_policy("https://example.com/a.png"),
     "no-referrer",
   )
+  // The host rule alone is not the shipped rule: an ftp URL on an asset host
+  // has the host but not the scheme, and the shipped function says no.
+  let cdn = codes_of_string("cdn.example.com")
+  let assets = codes_of_string("assets.example.org")
+  assert_true(referrer_downgrade_codes(cdn, cdn, assets))
+  assert_eq(
+    @lib.decide_referrer_policy("ftp://cdn.example.com/a.png"),
+    "no-referrer",
+  )
+}
+
+///|
+/// The host of an http(s) URL as the proved kernels take it: the authority is
+/// the text from after `://` to the first delimiter, and the host starts after
+/// the last `@` of it. No kernel strips a port, so a port stays in the result.
+fn conform_host_by_kernels(src : FixedArray[Int32]) -> FixedArray[Int32] {
+  let scheme_len = if scheme_is_http_codes(src) {
+    4
+  } else if scheme_is_https_codes(src) {
+    5
+  } else {
+    return FixedArray::make(0, 0)
+  }
+  let authority_start = scheme_len + 3
+  let authority_end = authority_end_codes(src, authority_start)
+  let authority = FixedArray::make(authority_end - authority_start, 0)
+  for i = authority_start; i < authority_end; i = i + 1 {
+    authority[i - authority_start] = src[i]
+  }
+  let host_start = host_start_codes(authority)
+  let host = FixedArray::make(authority.length() - host_start, 0)
+  for i = host_start; i < authority.length(); i = i + 1 {
+    host[i - host_start] = authority[i]
+  }
+  host
+}
+
+///|
+test "conform - the host rule composed from the kernels is the shipped allow-list" {
+  let cases = conform_url_hosts()
+  let cdn = codes_of_string("cdn.example.com")
+  let assets = codes_of_string("assets.example.org")
+  let mut checked = 0
+  for i = 0; i < cases.length(); i = i + 1 {
+    let url = cases[i].0
+    let src = codes_of_string(url)
+    let is_http = scheme_is_http_codes(src) || scheme_is_https_codes(src)
+    // Not an http(s) URL: there is no host to take, and the scheme alone
+    // decides. A URL with a port: the kernels keep the port, the shipped
+    // parser drops it. Both are left to the corpus test above.
+    if !is_http || @lib.str_contains(url, ":8080") {
+      continue
+    }
+    let host = conform_host_by_kernels(src)
+    assert_true(codes_equal(host, codes_of_string(cases[i].1)))
+    let kernel_says = host_matches_entry_codes(host, cdn) ||
+      host_matches_entry_codes(host, assets)
+    let shipped_says = @lib.decide_referrer_policy(url) ==
+      "no-referrer-when-downgrade"
+    assert_eq(shipped_says, kernel_says)
+    checked = checked + 1
+  }
+  // Non-vacuity: every http(s) URL without a port took part.
+  assert_eq(checked, cases.length() - 4)
 }
 
 // ---------------------------------------------------------------------------

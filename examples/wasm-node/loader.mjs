@@ -26,18 +26,23 @@ export function loadTextKernel(wasmPath = DEFAULT_WASM) {
       constants[imp.name] = imp.name;
     }
   }
-  // The CLI entry point adds WASI-like argv/fs imports and a console import.
-  // Business exports never call them, so stubs are enough for library hosts.
+  // The CLI entry point adds WASI-like imports: argv and file-system access
+  // (`__moonbit_fs_unstable`), process exit (`__moonbit_sys_unstable`) and a
+  // console import. Business exports call none of them, so a stub is enough
+  // for library hosts. The module names are read from the import table rather
+  // than listed here, so a new CLI option cannot break this loader again.
   // Calling one is a programming error and fails loudly rather than silently.
   const unsupported = new Proxy({}, {
     get: (_target, name) => () => {
       throw new Error(`textkernel Wasm host does not implement ${String(name)}`)
     },
   })
-  const instance = new WebAssembly.Instance(module, {
-    "_": constants,
-    "console": { log: () => {} },
-    "__moonbit_fs_unstable": unsupported,
-  });
+  const imports = { "_": constants, "console": { log: () => {} } };
+  for (const imp of WebAssembly.Module.imports(module)) {
+    if (imp.module.startsWith("__moonbit_") && !(imp.module in imports)) {
+      imports[imp.module] = unsupported;
+    }
+  }
+  const instance = new WebAssembly.Instance(module, imports);
   return instance.exports;
 }

@@ -2,8 +2,6 @@
 // in this package AND by the `.mbtp` specifications. Every value here is the
 // decimal code unit of a char literal; the tests at the bottom of this file pin
 // each one back to the literal so the two representations cannot drift apart.
-// `scripts/check_code_comments.mjs` does the same for the `U+XXXX` spelling in
-// the comment above each constant, which no MoonBit test can observe.
 
 ///|
 /// U+0026 `&`
@@ -90,8 +88,52 @@ const CH_LOWER_G : Int32 = 103
 const CH_SEMI : Int32 = 59
 
 ///|
+/// U+0023 `#`
+const CH_HASH : Int32 = 35
+
+///|
+/// U+0040 `@`
+const CH_AT : Int32 = 64
+
+///|
+/// U+002E `.`
+const CH_DOT : Int32 = 46
+
+///|
+/// U+0020, the space.
+const CH_SPACE : Int32 = 32
+
+///|
+/// U+007F DEL
+const CH_DEL : Int32 = 127
+
+///|
+/// Last code unit of the C0 controls, U+001F.
+const CONTROL_MAX : Int32 = 31
+
+///|
+/// U+0041 `A`
+const ASCII_UPPER_A : Int32 = 65
+
+///|
+/// U+005A `Z`
+const ASCII_UPPER_Z : Int32 = 90
+
+///|
+/// How far an upper-case ASCII letter is from its lower-case twin.
+const ASCII_CASE_GAP : Int32 = 32
+
+///|
 /// Lower bound of the UTF-16 surrogate range (U+D800).
 const SURROGATE_LO : Int32 = 55296
+
+///|
+/// Upper bound of the leading (high) half of that range (U+DBFF).
+const HIGH_SURR_HI : Int32 = 56319
+
+///|
+/// Lower bound of the trailing (low) half of that range (U+DC00).
+const LOW_SURR_LO : Int32 = 56320
 
 ///|
 /// Upper bound of the UTF-16 surrogate range (U+DFFF).
@@ -124,11 +166,11 @@ const NAME_LIMIT : Int32 = 120
 /// constant cannot be raised without one of them going red.
 ///
 /// This bound enters the proofs as `proof_require`, and since 2026-10-31 it also
-/// has a runtime mirror (`@lib.require_model_length`) on every shipping entry
-/// point. That check lives in `lib` rather than in these kernels because a
-/// contracted function body may not call `abort` — see the `[4207]` note in
-/// `docs/COREPROOF_DEEP_REVIEW.md §8.7`. `coreproof` still imports `lib` and
-/// never the reverse, so nothing in `lib` can call a kernel.
+/// has a runtime mirror (`@lib.MAX_SHIPPING_CODE_UNITS`, checked by every
+/// shipping entry point). That check lives in `lib` rather than in these
+/// kernels because a contracted function body may not call `abort` (error
+/// `[4207]`). `src/proof` imports `lib` and never the reverse, so nothing in
+/// `lib` can call a kernel.
 // The number lives in `@lib` so the shipping-side runtime checks and the proof
 // model cannot drift apart: this is a reference, not a second copy.
 const MAX_CODE_UNITS : Int32 = @lib.MAX_INPUT_CODE_UNITS
@@ -175,6 +217,29 @@ test "codes - surrogate range matches the UTF-16 block" {
   assert_eq(SURROGATE_LO, 0xD800)
   assert_eq(SURROGATE_HI, 0xDFFF)
   assert_eq(SURROGATE_HI - SURROGATE_LO + 1, 2048)
+  // The block is two halves of 1024: leading (high) and trailing (low).
+  assert_eq(HIGH_SURR_HI, 0xDBFF)
+  assert_eq(LOW_SURR_LO, 0xDC00)
+  assert_eq(LOW_SURR_LO - HIGH_SURR_HI, 1)
+  assert_eq(HIGH_SURR_HI - SURROGATE_LO + 1, 1024)
+  assert_eq(SURROGATE_HI - LOW_SURR_LO + 1, 1024)
+}
+
+///|
+test "codes - url, case and control constants match their literals" {
+  assert_eq(CH_HASH, '#'.to_int())
+  assert_eq(CH_AT, '@'.to_int())
+  assert_eq(CH_DOT, '.'.to_int())
+  assert_eq(CH_DEL, '\u{7F}'.to_int())
+  assert_eq(CONTROL_MAX, '\u{1F}'.to_int())
+  assert_eq(ASCII_UPPER_A, 'A'.to_int())
+  assert_eq(ASCII_UPPER_Z, 'Z'.to_int())
+  assert_eq(ASCII_CASE_GAP, 'a'.to_int() - 'A'.to_int())
+  // Only the 26 upper-case letters move; the bound of the C0 controls is the
+  // unit just before a space.
+  assert_eq('Z'.to_int() + ASCII_CASE_GAP, 'z'.to_int())
+  assert_eq(CONTROL_MAX + 1, CH_SPACE)
+  assert_eq(CH_SPACE, ' '.to_int())
 }
 
 ///|
@@ -183,6 +248,9 @@ test "codes - default name and limit match the shipped policy" {
   assert_eq(DEFAULT_NAME.length(), 4)
   assert_eq(NAME_LIMIT, 120)
   assert_eq(@lib.sanitize_filename(""), DEFAULT_NAME)
+  // A name made of dots only names a directory, and gets the default too.
+  assert_eq(@lib.sanitize_filename("."), DEFAULT_NAME)
+  assert_eq(@lib.sanitize_filename(".."), DEFAULT_NAME)
 }
 
 ///|

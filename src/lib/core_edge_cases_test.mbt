@@ -14,19 +14,19 @@ fn repeat_char(c : Char, n : Int32) -> String {
 // normalize_asset_url edge cases
 
 ///|
-test "[core-edge-cases] normalize - uppercase host unchanged" {
+test "[core-edge-cases] normalize - uppercase host matches the allow-list" {
   assert_eq(
     @lib.normalize_asset_url("https://CDN.EXAMPLE.COM/a.png"),
-    "https://CDN.EXAMPLE.COM/a.png",
+    "https://CDN.EXAMPLE.COM/a.png?fmt=png&v=1",
   )
 }
 
 ///|
-test "[core-edge-cases] normalize - trailing question mark adds & then params" {
+test "[core-edge-cases] normalize - empty query receives params without a stray &" {
   let url = "https://cdn.example.com/img?"
   assert_eq(
     @lib.normalize_asset_url(url),
-    "https://cdn.example.com/img?&fmt=png&v=1",
+    "https://cdn.example.com/img?fmt=png&v=1",
   )
 }
 
@@ -104,8 +104,8 @@ test "[core-edge-cases] sanitize_filename - length limit 120" {
 test "[core-edge-cases] sanitize_filename - unicode handling" {
   // ASCII characters are preserved
   assert_eq(@lib.sanitize_filename("document.txt"), "document.txt")
-  // Emoji and surrogate pairs become underscores (original behavior)
-  assert_eq(@lib.sanitize_filename("🎉party🎊.jpg"), "__party__.jpg")
+  // A well-formed surrogate pair is one character and is kept
+  assert_eq(@lib.sanitize_filename("🎉party🎊.jpg"), "🎉party🎊.jpg")
 }
 
 ///|
@@ -114,10 +114,10 @@ test "[core-edge-cases] decide_referrer_policy - empty string" {
 }
 
 ///|
-test "[core-edge-cases] decide_referrer_policy - case sensitive" {
+test "[core-edge-cases] decide_referrer_policy - host names ignore letter case" {
   assert_eq(
     @lib.decide_referrer_policy("https://CDN.EXAMPLE.COM/image.jpg"),
-    "no-referrer",
+    "no-referrer-when-downgrade",
   )
 }
 

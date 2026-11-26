@@ -1,5 +1,26 @@
-/// Core library for URL normalization, referrer policy decision, and filename sanitization.
-/// NOTE: Logic parity with JS fallback in wasmLoader.js is required when possible.
+/// Core library for HTML escaping, filename sanitising, asset URL
+/// normalisation and Referrer-Policy selection.
+///
+/// Three rules run through the whole file.
+///
+/// 1. *Well-formed text passes through.* Every routine walks UTF-16 code
+///    units, but a well-formed surrogate pair — a character outside the BMP,
+///    such as an emoji or a CJK Extension B ideograph — is one character and
+///    is copied whole. Only an unpaired surrogate half becomes `_`. Such a
+///    half cannot be written in MoonBit source; it arrives from a host that
+///    hands over ill-formed UTF-16, such as a JS caller of the WASM exports.
+///
+/// 2. *Every public entry point enforces the shipping domain.* An input above
+///    `MAX_SHIPPING_CODE_UNITS` is refused before any work is done: `Err` from
+///    a `*_result` function, `""` from a `*_safe` function, an abort from the
+///    fail-fast compatibility layer. There is no second, smaller limit, and an
+///    empty input is a valid input.
+///
+/// 3. *Pure bodies, one abort site.* Each `*_build` and `*_impl` function is
+///    total: it checks no bound and never aborts. The public wrappers add the
+///    domain check and route a failure through `apply_failure_policy`. The one
+///    exception is `str_contains`, which has no checked variant and keeps its
+///    fail-fast guard.
 
 ///|
 /// Return true if `haystack` contains `needle` as a UTF-16 code-unit substring (ASCII-safe).
@@ -79,22 +100,18 @@ pub fn default_asset_config() -> AssetConfig {
 
 ///|
 /// Create a configuration for a deployment without touching library source.
+///
+/// A host entry is a host name such as `cdn.internal.example` — no scheme,
+/// no path, no port. It matches that host and its subdomains, in any letter
+/// case. A default parameter is one `key=value` or a bare `key`; several may
+/// be joined with `&`. A parameter that could change the structure of the URL
+/// (empty, starting with `=`, or containing `#`, whitespace or a control
+/// character) is ignored when a URL is built.
 pub fn create_asset_config(
   hosts : Array[String],
   default_params : Array[String],
 ) -> AssetConfig {
   { hosts, default_params, }
-}
-
-///|
-/// True when the input mentions any host in the configuration.
-fn config_host_matches(input : String, config : AssetConfig) -> Bool {
-  for host in config.hosts {
-    if str_contains(input, host) {
-      return true
-    }
-  }
-  false
 }
 
 ///|
@@ -112,173 +129,35 @@ fn param_key(param : String) -> String {
 }
 
 ///|
-/// Normalize an asset URL with an explicit host allow-list and default params.
-/// Hosts outside the config are returned verbatim; configured hosts are forced
-/// to HTTPS and receive any missing default query parameter.
-pub fn normalize_asset_url_with_config(
-  input : String,
-  config : AssetConfig,
-) -> String {
-  require_model_length(input, "normalize_asset_url_with_config")
-  if input.length() == 0 {
-    return input
+/// Copy one character of `input` to `out` and return the index of the next one.
+///
+/// A well-formed surrogate pair is copied whole, as the two code units it is.
+/// An unpaired surrogate half has no character to copy and becomes `_`.
+/// Everything else is a single BMP character.
+fn copy_text_unit(out : StringBuilder, input : String, i : Int32) -> Int32 {
+  let code = input[i]
+  if code.is_leading_surrogate() &&
+    i + 1 < input.length() &&
+    input[i + 1].is_trailing_surrogate() {
+    out.write_stringview(input[i:i + 2])
+    return i + 2
   }
-  if !config_host_matches(input, config) {
-    return input
+  match code.to_char() {
+    Some(c) => out.write_char(c)
+    None => out.write_char('_')
   }
-
-  // Only the scheme prefix is rewritten; the tail is copied verbatim.
-  // Rebuilding it from UInt16 code units would emit decimal code points.
-  let mut processed = input
-  let http_prefix = "http://"
-  let https_prefix = "https://"
-  if processed.has_prefix(http_prefix) {
-    processed = https_prefix + processed[http_prefix.length():].to_owned()
-  }
-
-  let has_q = str_contains(processed, "?")
-  let mut sep = if has_q { "&" } else { "?" }
-  let mut suffix = ""
-  for param in config.default_params {
-    if !str_contains(processed, param_key(param) + "=") {
-      suffix = suffix + sep + param
-      sep = "&"
-    }
-  }
-  processed + suffix
+  i + 1
 }
 
 ///|
-/// Historical default configuration; identical to earlier releases.
-pub fn normalize_asset_url(input : String) -> String {
-  normalize_asset_url_with_config(input, default_asset_config())
-}
-
-///|
-/// Decide a Referrer-Policy from an explicit host allow-list.
-pub fn decide_referrer_policy_with_config(
-  input : String,
-  config : AssetConfig,
-) -> String {
-  if config_host_matches(input, config) {
-    "no-referrer-when-downgrade"
-  } else {
-    "no-referrer"
-  }
-}
-
-///|
-/// Historical default configuration; identical to earlier releases.
-pub fn decide_referrer_policy(input : String) -> String {
-  decide_referrer_policy_with_config(input, default_asset_config())
-}
-
-///|
-/// Sanitize a filename by replacing invalid characters with '_' and clamping length to 120 code units.
-/// If input is empty, defaults to "file". Optimized version maintaining original behavior.
-fn sanitize_filename_build(name : String) -> String {
-  require_model_length(name, "sanitize_filename")
-  let base = if name.length() == 0 { "file" } else { name }
-
-  // A StringBuilder keeps the loop amortised O(n). The previous
-  // `out = out + x` copied the whole prefix on every iteration, which made the
-  // native backend quadratic (4x input -> ~8x runtime, measured 20k -> 80k
-  // code units). Output is byte-for-byte identical; see
-  // `string_builder_regression_test.mbt` for the legacy-vs-new differential.
-  let out = StringBuilder(capacity=120)
-  let mut i = 0
-  let mut count = 0
-  while i < base.length() && count < 120 {
-    let code = base[i]
-
-    if is_invalid_filename_char(code) {
-      out.write_char('_')
-      i = i + 1
-      count = count + 1
-      continue
-    }
-
-    match code.to_char() {
-      Some(c) => {
-        out.write_char(c)
-        i = i + 1
-        count = count + 1
-      }
-      None => {
-        // Unpaired surrogate, replace and advance one unit
-        out.write_char('_')
-        i = i + 1
-        count = count + 1
-      }
-    }
-  }
-  out.to_string()
-}
-
-///|
-/// Checked form of `sanitize_filename`. Never aborts: domain violations and invariant
-/// failures both come back as `Err`. This is the recommended production API.
-fn sanitize_filename_checked_impl(name : String) -> Result[String, CoreError] {
-  match check_model_length(name, "sanitize_filename") {
-    Err(e) => return Err(e)
-    Ok(_) => ()
-  }
-  let result = sanitize_filename_build(name)
-  if !filename_is_sanitized(result) {
-    Err(
-      InvariantViolation(
-        "sanitize_filename: output violates the filename invariant",
-      ),
-    )
-  } else {
-    Ok(result)
-  }
-}
-
-///|
-/// String-returning form with an explicit failure policy.
-pub fn sanitize_filename_with_policy(
-  name : String,
-  policy : FailurePolicy,
-) -> String {
-  match sanitize_filename_checked_impl(name) {
-    Ok(result) => result
-    Err(e) => apply_failure_policy(e, policy)
-  }
-}
-
-///|
-/// Fail-fast compatibility layer. Signature is unchanged for existing callers
-/// and for the WASM exports; new code should use `sanitize_filename_result` or
-/// `sanitize_filename_with_policy`.
-pub fn sanitize_filename(name : String) -> String {
-  sanitize_filename_with_policy(name, FailFast)
-}
-
-///|
-/// Check if a character code represents an invalid filename character.
-/// Invalid set: / \\ : * ? " < > |
-fn is_invalid_filename_char(code : UInt16) -> Bool {
-  code == '/' ||
-  code == '\\' ||
-  code == ':' ||
-  code == '*' ||
-  code == '?' ||
-  code == '"' ||
-  code == '<' ||
-  code == '>' ||
-  code == '|'
-}
-
-///|
-/// Escape HTML text content by replacing '&', '<', '>' with their entities.
-/// Non-ASCII code units are preserved when decodable as Char; undecodable units become '_'.
+/// Escape HTML text content by replacing `&`, `<`, `>` with their entities.
+/// Every other character, emoji and other non-BMP characters included, is
+/// copied as it is; an unpaired surrogate half becomes `_`.
 fn escape_html_build(input : String) -> String {
-  require_model_length(input, "escape_html")
-  // Amortised O(n): see the note in `sanitize_filename`.
   let out = StringBuilder(capacity=input.length())
+  let n = input.length()
   let mut i = 0
-  while i < input.length() {
+  while i < n {
     let code = input[i]
     if code == '&' {
       out.write_string("&amp;")
@@ -295,23 +174,75 @@ fn escape_html_build(input : String) -> String {
       i = i + 1
       continue
     }
-    match code.to_char() {
-      Some(c) => {
-        out.write_char(c)
-        i = i + 1
+    if code.to_int() < 0xD800 {
+      // Below the surrogate block every code unit is a whole BMP character.
+      // This is nearly every unit of real text, so it skips the pairing test.
+      match code.to_char() {
+        Some(c) => out.write_char(c)
+        None => out.write_char('_')
       }
-      None => {
-        out.write_char('_')
-        i = i + 1
-      }
+      i = i + 1
+      continue
     }
+    i = copy_text_unit(out, input, i)
   }
   out.to_string()
 }
 
 ///|
-/// Checked form of `escape_html`. Never aborts: domain violations and invariant
-/// failures both come back as `Err`. This is the recommended production API.
+/// Escape HTML attribute content. In addition to text escaping, also escape `"` and `'`.
+/// Mappings: `&` -> &amp;, `<` -> &lt;, `>` -> &gt;, `"` -> &quot;, `'` -> &#39;
+/// Every other character is copied as it is, as in `escape_html`.
+fn escape_attr_build(input : String) -> String {
+  let out = StringBuilder(capacity=input.length())
+  let n = input.length()
+  let mut i = 0
+  while i < n {
+    let code = input[i]
+    if code == '&' {
+      out.write_string("&amp;")
+      i = i + 1
+      continue
+    }
+    if code == '<' {
+      out.write_string("&lt;")
+      i = i + 1
+      continue
+    }
+    if code == '>' {
+      out.write_string("&gt;")
+      i = i + 1
+      continue
+    }
+    if code == '"' {
+      out.write_string("&quot;")
+      i = i + 1
+      continue
+    }
+    if code == '\'' {
+      out.write_string("&#39;")
+      i = i + 1
+      continue
+    }
+    if code.to_int() < 0xD800 {
+      // Below the surrogate block every code unit is a whole BMP character.
+      // This is nearly every unit of real text, so it skips the pairing test.
+      match code.to_char() {
+        Some(c) => out.write_char(c)
+        None => out.write_char('_')
+      }
+      i = i + 1
+      continue
+    }
+    i = copy_text_unit(out, input, i)
+  }
+  out.to_string()
+}
+
+///|
+/// Checked form of `escape_html`. Never aborts: a domain violation and an
+/// invariant failure both come back as `Err`. This is the recommended
+/// production API. Empty input is valid and yields `Ok("")`.
 fn escape_html_checked_impl(input : String) -> Result[String, CoreError] {
   match check_model_length(input, "escape_html") {
     Err(e) => return Err(e)
@@ -346,57 +277,9 @@ pub fn escape_html(input : String) -> String {
 }
 
 ///|
-/// Escape HTML attribute content. In addition to text escaping, also escape '"' and '\''.
-/// Mappings: '&' -> &amp;, '<' -> &lt;, '>' -> &gt;, '"' -> &quot;, '\'' -> &#39;
-fn escape_attr_build(input : String) -> String {
-  require_model_length(input, "escape_attr")
-  // Amortised O(n): see the note in `sanitize_filename`.
-  let out = StringBuilder(capacity=input.length())
-  let mut i = 0
-  while i < input.length() {
-    let code = input[i]
-    if code == '&' {
-      out.write_string("&amp;")
-      i = i + 1
-      continue
-    }
-    if code == '<' {
-      out.write_string("&lt;")
-      i = i + 1
-      continue
-    }
-    if code == '>' {
-      out.write_string("&gt;")
-      i = i + 1
-      continue
-    }
-    if code == '"' {
-      out.write_string("&quot;")
-      i = i + 1
-      continue
-    }
-    if code == '\'' {
-      out.write_string("&#39;")
-      i = i + 1
-      continue
-    }
-    match code.to_char() {
-      Some(c) => {
-        out.write_char(c)
-        i = i + 1
-      }
-      None => {
-        out.write_char('_')
-        i = i + 1
-      }
-    }
-  }
-  out.to_string()
-}
-
-///|
-/// Checked form of `escape_attr`. Never aborts: domain violations and invariant
-/// failures both come back as `Err`. This is the recommended production API.
+/// Checked form of `escape_attr`. Never aborts: a domain violation and an
+/// invariant failure both come back as `Err`. This is the recommended
+/// production API. Empty input is valid and yields `Ok("")`.
 fn escape_attr_checked_impl(input : String) -> Result[String, CoreError] {
   match check_model_length(input, "escape_attr") {
     Err(e) => return Err(e)
@@ -435,6 +318,149 @@ pub fn escape_attr(input : String) -> String {
 }
 
 ///|
+/// Sanitize a filename: see `filename.mbt` for the rules. The result is a name
+/// that can be created as a file on Linux, macOS and Windows — never a
+/// directory reference such as `..` — of at most 120 UTF-16 code units.
+fn sanitize_filename_build(name : String) -> String {
+  let base = if name.length() == 0 { "file" } else { name }
+  let n = base.length()
+  let out = StringBuilder(capacity=FILENAME_LIMIT)
+  let mut i = 0
+  let mut count = 0
+  while i < n && count < FILENAME_LIMIT {
+    let code = base[i]
+    // A well-formed pair is one character: it is copied whole or not at all,
+    // so the clamp can never cut a character in half.
+    if code.is_leading_surrogate() &&
+      i + 1 < n &&
+      base[i + 1].is_trailing_surrogate() {
+      if count + 2 > FILENAME_LIMIT {
+        break
+      }
+      out.write_stringview(base[i:i + 2])
+      i = i + 2
+      count = count + 2
+      continue
+    }
+    if is_invalid_filename_char(code) ||
+      is_control_filename_char(code) ||
+      code.is_leading_surrogate() ||
+      code.is_trailing_surrogate() {
+      out.write_char('_')
+    } else {
+      match code.to_char() {
+        Some(c) => out.write_char(c)
+        None => out.write_char('_')
+      }
+    }
+    i = i + 1
+    count = count + 1
+  }
+  finalize_filename(out.to_string())
+}
+
+///|
+/// Checked form of `sanitize_filename`. Never aborts: domain violations and
+/// invariant failures both come back as `Err`. This is the recommended
+/// production API. Empty input is valid and yields `Ok("file")`.
+fn sanitize_filename_checked_impl(name : String) -> Result[String, CoreError] {
+  match check_model_length(name, "sanitize_filename") {
+    Err(e) => return Err(e)
+    Ok(_) => ()
+  }
+  let result = sanitize_filename_build(name)
+  if !filename_is_sanitized(result) {
+    Err(
+      InvariantViolation(
+        "sanitize_filename: output violates the filename invariant",
+      ),
+    )
+  } else {
+    Ok(result)
+  }
+}
+
+///|
+/// String-returning form with an explicit failure policy.
+pub fn sanitize_filename_with_policy(
+  name : String,
+  policy : FailurePolicy,
+) -> String {
+  match sanitize_filename_checked_impl(name) {
+    Ok(result) => result
+    Err(e) => apply_failure_policy(e, policy)
+  }
+}
+
+///|
+/// Fail-fast compatibility layer. Signature is unchanged for existing callers
+/// and for the WASM exports; new code should use `sanitize_filename_result` or
+/// `sanitize_filename_with_policy`.
+pub fn sanitize_filename(name : String) -> String {
+  sanitize_filename_with_policy(name, FailFast)
+}
+
+///|
+/// Normalize an asset URL with an explicit host allow-list and default params.
+///
+/// Only an `http` or `https` URL, in any letter case, whose host is in the
+/// allow-list is changed: the scheme becomes `https`, and every default
+/// parameter the query does not already have is appended to the query. The
+/// authority, the path, the existing query and the fragment are carried over
+/// verbatim, and a missing parameter is inserted before the `#fragment`,
+/// never after it. Any other input — another scheme, a relative reference, or
+/// a host that merely occurs somewhere in the path or the query — is returned
+/// unchanged.
+///
+/// A default parameter that cannot be appended safely is not skipped: for a
+/// URL the configuration applies to, this aborts with the offending piece.
+/// The parameters are not looked at for any other URL, so a configuration with
+/// such a piece still works for the hosts it is not used on.
+pub fn normalize_asset_url_with_config(
+  input : String,
+  config : AssetConfig,
+) -> String {
+  match normalize_asset_url_with_config_result(input, config) {
+    Ok(url) => url
+    Err(e) => apply_failure_policy(e, FailFast)
+  }
+}
+
+///|
+/// Historical default configuration; identical to earlier releases.
+pub fn normalize_asset_url(input : String) -> String {
+  normalize_asset_url_with_config(input, default_asset_config())
+}
+
+///|
+/// Decide a Referrer-Policy from an explicit host allow-list.
+///
+/// An `http` or `https` URL whose host is in the allow-list gets
+/// `no-referrer-when-downgrade`; everything else gets `no-referrer`. The test
+/// is the same one `normalize_asset_url_with_config` applies, so the two
+/// functions can never disagree about what an asset host is.
+pub fn decide_referrer_policy_with_config(
+  input : String,
+  config : AssetConfig,
+) -> String {
+  match check_model_length(input, "decide_referrer_policy") {
+    Ok(_) =>
+      if url_is_allowed_asset(input, config) {
+        "no-referrer-when-downgrade"
+      } else {
+        "no-referrer"
+      }
+    Err(e) => apply_failure_policy(e, FailFast)
+  }
+}
+
+///|
+/// Historical default configuration; identical to earlier releases.
+pub fn decide_referrer_policy(input : String) -> String {
+  decide_referrer_policy_with_config(input, default_asset_config())
+}
+
+///|
 /// Alias of normalize_asset_url for naming symmetry when used as a general-purpose "ensure" helper.
 pub fn ensure_asset_params(input : String) -> String {
   normalize_asset_url(input)
@@ -450,107 +476,106 @@ pub fn ensure_asset_params_with_config(
 }
 
 ///|
-/// Result-based variant of normalize_asset_url_with_config with input validation.
+/// Result-based variant of `normalize_asset_url_with_config`.
+///
+/// Returns `Ok(normalized_url)` for every input up to `MAX_SHIPPING_CODE_UNITS`,
+/// the empty string included. Beyond it, `Err(InputTooLarge)`.
+///
+/// `Err(InvalidConfig(piece))` when the configuration holds a default
+/// parameter that cannot be appended as it is — empty, starting with `=`, or
+/// containing `#`, whitespace or a control character — and the URL is one the
+/// configuration applies to. The piece is the message. Such a piece used to be
+/// skipped silently. Never aborts.
 pub fn normalize_asset_url_with_config_result(
   input : String,
   config : AssetConfig,
 ) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match
-    validate_string_input(
-      "normalize_asset_url_with_config_result", input, max_len,
-    ) {
-    Ok(_) => Ok(normalize_asset_url_with_config(input, config))
+  match check_model_length(input, "normalize_asset_url") {
+    Ok(_) =>
+      match normalize_asset_url_impl(input, config) {
+        Ok(url) => Ok(url)
+        Err(piece) => Err(InvalidConfig(piece))
+      }
     Err(e) => Err(e)
   }
 }
 
 ///|
-/// Result-based variant of normalize_asset_url with input validation.
-/// Returns Ok(normalized_url) on success; Err(CoreError) when input exceeds safe length.
+/// Result-based variant of `normalize_asset_url`.
+/// Returns `Ok(normalized_url)` for every input up to `MAX_SHIPPING_CODE_UNITS`
+/// and `Err(InputTooLarge)` beyond it, or `Err(InvalidConfig(piece))` for a
+/// default parameter of the configuration that cannot be appended. Never aborts.
 pub fn normalize_asset_url_result(input : String) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match validate_string_input("normalize_asset_url_result", input, max_len) {
-    Ok(_) => Ok(normalize_asset_url(input))
-    Err(e) => Err(e)
-  }
+  normalize_asset_url_with_config_result(input, default_asset_config())
 }
 
 ///|
-/// Result-based variant of decide_referrer_policy with input validation.
-/// Returns Ok(policy) on success; Err(CoreError) when input exceeds safe length.
-pub fn decide_referrer_policy_result(
-  input : String,
-) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match validate_string_input("decide_referrer_policy_result", input, max_len) {
-    Ok(_) => Ok(decide_referrer_policy(input))
-    Err(e) => Err(e)
-  }
-}
-
-///|
-/// Result-based variant of decide_referrer_policy_with_config.
+/// Result-based variant of `decide_referrer_policy_with_config`.
+/// Returns `Ok(policy)` for every input up to `MAX_SHIPPING_CODE_UNITS` and
+/// `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn decide_referrer_policy_with_config_result(
   input : String,
   config : AssetConfig,
 ) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match
-    validate_string_input(
-      "decide_referrer_policy_with_config_result", input, max_len,
-    ) {
-    Ok(_) => Ok(decide_referrer_policy_with_config(input, config))
+  match check_model_length(input, "decide_referrer_policy") {
+    Ok(_) =>
+      Ok(
+        if url_is_allowed_asset(input, config) {
+          "no-referrer-when-downgrade"
+        } else {
+          "no-referrer"
+        },
+      )
     Err(e) => Err(e)
   }
 }
 
 ///|
-/// Result-based variant of sanitize_filename with input validation.
-/// Returns Ok(sanitized) on success; Err(CoreError) when input exceeds safe length.
+/// Result-based variant of `decide_referrer_policy`.
+/// Returns `Ok(policy)` for every input up to `MAX_SHIPPING_CODE_UNITS` and
+/// `Err(InputTooLarge)` beyond it. Never aborts.
+pub fn decide_referrer_policy_result(
+  input : String,
+) -> Result[String, CoreError] {
+  decide_referrer_policy_with_config_result(input, default_asset_config())
+}
+
+///|
+/// Result-based variant of `sanitize_filename`.
+/// Returns `Ok(sanitized)` for every input up to `MAX_SHIPPING_CODE_UNITS`,
+/// the empty string included, and `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn sanitize_filename_result(name : String) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match validate_string_input("sanitize_filename_result", name, max_len) {
-    Ok(_) => sanitize_filename_checked_impl(name)
-    Err(e) => Err(e)
-  }
+  sanitize_filename_checked_impl(name)
 }
 
 ///|
-/// Result-based variant of escape_html with input validation.
-/// Returns Ok(escaped) on success; Err(CoreError) when input exceeds safe length.
+/// Result-based variant of `escape_html`.
+/// Returns `Ok(escaped)` for every input up to `MAX_SHIPPING_CODE_UNITS`, the
+/// empty string included, and `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn escape_html_result(input : String) -> Result[String, CoreError] {
-  let max_len : Int32 = 8192
-  match validate_string_input("escape_html_result", input, max_len) {
-    Ok(_) => escape_html_checked_impl(input)
-    Err(e) => Err(e)
-  }
+  escape_html_checked_impl(input)
 }
 
 ///|
-/// Result-based variant of escape_attr with input validation.
-/// Returns Ok(escaped) on success; Err(CoreError) when input exceeds safe length.
+/// Result-based variant of `escape_attr`.
+/// Returns `Ok(escaped)` for every input up to `MAX_SHIPPING_CODE_UNITS`, the
+/// empty string included, and `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn escape_attr_result(input : String) -> Result[String, CoreError] {
-  let max_len : Int32 = 8192
-  match validate_string_input("escape_attr_result", input, max_len) {
-    Ok(_) => escape_attr_checked_impl(input)
-    Err(e) => Err(e)
-  }
+  escape_attr_checked_impl(input)
 }
 
 ///|
-/// Result-based alias of ensure_asset_params with input validation.
-/// Returns Ok(result) on success; Err(CoreError) when input exceeds safe length.
+/// Result-based alias of `ensure_asset_params`.
+/// Returns `Ok(result)` for every input up to `MAX_SHIPPING_CODE_UNITS` and
+/// `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn ensure_asset_params_result(input : String) -> Result[String, CoreError] {
-  let max_len : Int32 = 4096
-  match validate_string_input("ensure_asset_params_result", input, max_len) {
-    Ok(_) => Ok(ensure_asset_params(input))
-    Err(e) => Err(e)
-  }
+  normalize_asset_url_result(input)
 }
 
 ///|
-/// Result-based alias of ensure_asset_params_with_config.
+/// Result-based alias of `ensure_asset_params_with_config`.
+/// Returns `Ok(result)` for every input up to `MAX_SHIPPING_CODE_UNITS` and
+/// `Err(InputTooLarge)` beyond it. Never aborts.
 pub fn ensure_asset_params_with_config_result(
   input : String,
   config : AssetConfig,
@@ -561,8 +586,9 @@ pub fn ensure_asset_params_with_config_result(
 ///|
 /// Never-fail variants for trust boundaries. A WASM trap takes down the host
 /// embedder, so these return `""` on any domain or invariant error instead of
-/// aborting. Callers should treat `""` as a failure signal. These are what the
-/// `*_safe` WASM exports delegate to.
+/// aborting. Callers should treat `""` as a failure signal — except from
+/// `escape_html_safe` and `escape_attr_safe` on empty input, which is also
+/// `""`. These are what the `*_safe` WASM exports delegate to.
 pub fn escape_html_safe(input : String) -> String {
   escape_html_with_policy(input, EmptyOnError)
 }

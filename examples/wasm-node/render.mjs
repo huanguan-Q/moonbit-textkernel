@@ -39,6 +39,15 @@ assert.equal(hostile.includes('onmouseover="alert'), false);
 assert.equal(hostile.includes("&lt;script&gt;"), true);
 assert.equal(hostile.includes("&quot; onmouseover=&quot;"), true);
 
+// A character outside the BMP is two UTF-16 code units and comes through
+// whole; only an unpaired half, which a JS caller can still send, becomes `_`.
+const emoji = renderComment({ author: "Ada😀", body: "好😀 <b>tail" });
+assert.equal(
+  emoji,
+  '<div class="comment" data-author="Ada😀"><p>好😀 &lt;b&gt;tail</p></div>',
+);
+assert.equal(k.escape_attr_safe("x\uD800y"), "x_y");
+
 // The shipping cap is 8,000,000 code units. A payload one unit over it used
 // to abort inside WASM (a trap that takes down the embedder). The safe export
 // now returns "" and the caller can degrade gracefully.

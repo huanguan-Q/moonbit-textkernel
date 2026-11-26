@@ -24,7 +24,7 @@ async fn main {
     if arg == "--input" || arg == "--hosts" || arg == "--params" {
       if i + 1 >= args.length() {
         println(@lib.cli_json_error(command, "missing value for " + arg))
-        return
+        @env.exit(@lib.CLI_USAGE_EXIT)
       }
       let value = args[i + 1]
       if arg == "--input" {
@@ -48,6 +48,9 @@ async fn main {
   let config = @lib.cli_config(hosts_csv, params_csv)
   match @lib.run_cli(command, text, config) {
     Ok(output) => println(@lib.cli_json_line(command, output))
-    Err(message) => println(@lib.cli_json_error(command, message))
+    Err(message) => {
+      println(@lib.cli_json_error(command, message))
+      @env.exit(@lib.CLI_USAGE_EXIT)
+    }
   }
 }

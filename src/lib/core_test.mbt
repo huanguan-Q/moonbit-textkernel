@@ -68,12 +68,11 @@ test "[core] normalize - subdomain asset host" {
 }
 
 ///|
-test "[core] normalize - host substring in query still treated as asset" {
+test "[core] normalize - a host that only occurs in the query is not an asset host" {
+  // The allow-list is applied to the URL's own host. A CDN address that is
+  // merely a value inside somebody else's query must not get rewritten.
   let url = "https://example.com/?img=https://cdn.example.com/a.png"
-  assert_eq(
-    @lib.normalize_asset_url(url),
-    "https://example.com/?img=https://cdn.example.com/a.png&fmt=png&v=1",
-  )
+  assert_eq(@lib.normalize_asset_url(url), url)
 }
 
 ///|
@@ -93,15 +92,16 @@ test "[core] policy - non asset uses no-referrer" {
 }
 
 ///|
-test "[core] policy - asset substring in query treated as asset" {
+test "[core] policy - a host that only occurs in the query is not an asset host" {
   let url = "https://example.com/?img=https://cdn.example.com/a.png"
-  assert_eq(@lib.decide_referrer_policy(url), "no-referrer-when-downgrade")
+  assert_eq(@lib.decide_referrer_policy(url), "no-referrer")
 }
 
 ///|
-test "[core] policy - uppercase host not treated as asset" {
+test "[core] policy - uppercase host is the same host" {
+  // A DNS name has no letter case, so the allow-list ignores it.
   let url = "https://CDN.EXAMPLE.COM/a.png"
-  assert_eq(@lib.decide_referrer_policy(url), "no-referrer")
+  assert_eq(@lib.decide_referrer_policy(url), "no-referrer-when-downgrade")
 }
 
 ///|
@@ -129,9 +129,9 @@ test "[core] sanitize - replace invalid ascii" {
 }
 
 ///|
-test "[core] sanitize - emoji becomes underscores" {
-  // '🙂' is a surrogate pair; current implementation replaces each unit with '_'
-  assert_eq(@lib.sanitize_filename("A🙂B"), "A__B")
+test "[core] sanitize - a character outside the BMP is one character" {
+  // '🙂' is a well-formed surrogate pair: it is copied whole, not replaced.
+  assert_eq(@lib.sanitize_filename("A🙂B"), "A🙂B")
 }
 
 ///|
@@ -156,19 +156,21 @@ test "[core] escape_html - quotes remain intact" {
 // @lib.normalize_asset_url edge cases
 
 ///|
-test "[core] normalize - uppercase host unchanged" {
+test "[core] normalize - uppercase host is the same host, kept as written" {
+  // The host matches the allow-list and gets its parameters; the letters of
+  // the authority are carried over verbatim.
   assert_eq(
     @lib.normalize_asset_url("https://CDN.EXAMPLE.COM/a.png"),
-    "https://CDN.EXAMPLE.COM/a.png",
+    "https://CDN.EXAMPLE.COM/a.png?fmt=png&v=1",
   )
 }
 
 ///|
-test "[core] normalize - trailing question mark adds & then params" {
+test "[core] normalize - empty query receives the params without a stray &" {
   let url = "https://cdn.example.com/img?"
   assert_eq(
     @lib.normalize_asset_url(url),
-    "https://cdn.example.com/img?&fmt=png&v=1",
+    "https://cdn.example.com/img?fmt=png&v=1",
   )
 }
 
@@ -301,8 +303,8 @@ test "[core] str_contains - large haystack scan" {
 }
 
 ///|
-test "[core] escape_html - surrogate pair becomes underscores" {
-  assert_eq(@lib.escape_html("A🙂B"), "A__B")
+test "[core] escape_html - a character outside the BMP passes through" {
+  assert_eq(@lib.escape_html("A🙂B"), "A🙂B")
 }
 
 ///|
@@ -313,8 +315,8 @@ test "[core] escape_attr - basic entities incl quotes" {
 }
 
 ///|
-test "[core] escape_attr - surrogate pair becomes underscores" {
-  assert_eq(@lib.escape_attr("A🙂B"), "A__B")
+test "[core] escape_attr - a character outside the BMP passes through" {
+  assert_eq(@lib.escape_attr("A🙂B"), "A🙂B")
 }
 
 ///|
@@ -338,17 +340,13 @@ test "[core] normalize_result - ok parity" {
 }
 
 ///|
-/// Result variants: Err on excessive length (4096 threshold)
-test "[core] normalize_result - long input err" {
-  let long_tail = repeat('x', 5000)
-  let url = "https://cdn.example.com/" + long_tail
-  match @lib.normalize_asset_url_result(url) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false) // expected PerformanceWarning
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] normalize_result - long input ok" {
+  let arg = "https://cdn.example.com/" + repeat('x', 5000)
+  match @lib.normalize_asset_url_result(arg) {
+    Ok(v) => assert_eq(v, @lib.normalize_asset_url(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 
@@ -363,60 +361,46 @@ test "[core] policy_result - ok parity" {
 }
 
 ///|
-/// Result variants: Err on excessive length (4096 threshold)
-test "[core] policy_result - long input err" {
-  let long_tail = repeat('x', 5000)
-  let url = "https://example.com/" + long_tail
-  match @lib.decide_referrer_policy_result(url) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false)
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] policy_result - long input ok" {
+  let arg = "https://example.com/" + repeat('x', 5000)
+  match @lib.decide_referrer_policy_result(arg) {
+    Ok(v) => assert_eq(v, @lib.decide_referrer_policy(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 
 ///|
-/// Result variants: Err on excessive length (4096 threshold)
-test "[core] sanitize_result - long input err" {
-  let very_long = repeat('x', 5000)
-  match @lib.sanitize_filename_result(very_long) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false)
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] sanitize_result - long input ok" {
+  let arg = repeat('x', 5000)
+  match @lib.sanitize_filename_result(arg) {
+    Ok(v) => assert_eq(v, @lib.sanitize_filename(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 
 ///|
-/// Result variants: Err on excessive length (8192 threshold)
-test "[core] escape_html_result - long input err" {
-  let very_long = repeat('x', 9000)
-  match @lib.escape_html_result(very_long) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false)
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] escape_html_result - long input ok" {
+  let arg = repeat('x', 9000)
+  match @lib.escape_html_result(arg) {
+    Ok(v) => assert_eq(v, @lib.escape_html(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 
 ///|
-/// Result variants: Err on excessive length (4096 threshold)
-test "[core] ensure_asset_params_result - long input err" {
-  let long_tail = repeat('x', 5000)
-  let url = "https://cdn.example.com/" + long_tail
-  match @lib.ensure_asset_params_result(url) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false)
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] ensure_asset_params_result - long input ok" {
+  let arg = "https://cdn.example.com/" + repeat('x', 5000)
+  match @lib.ensure_asset_params_result(arg) {
+    Ok(v) => assert_eq(v, @lib.ensure_asset_params(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 
@@ -431,16 +415,13 @@ test "[core] escape_attr_result - ok parity" {
 }
 
 ///|
-/// Result variants: Err on excessive length (8192 threshold)
-test "[core] escape_attr_result - long input err" {
-  let very_long = repeat('x', 9000)
-  match @lib.escape_attr_result(very_long) {
-    Err(e) => {
-      let s = @lib.error_to_string(e)
-      assert_eq(@lib.str_contains(s, "Performance Warning:"), true)
-      assert_eq(@lib.str_contains(s, "exceeds recommended maximum"), true)
-    }
-    _ => assert_eq(true, false)
+/// Result variants: a long input is an ordinary input. The only bound is
+/// `MAX_SHIPPING_CODE_UNITS`, so a few thousand units behave exactly like five.
+test "[core] escape_attr_result - long input ok" {
+  let arg = repeat('x', 9000)
+  match @lib.escape_attr_result(arg) {
+    Ok(v) => assert_eq(v, @lib.escape_attr(arg))
+    _ => assert_eq(true, false) // unexpected Err
   }
 }
 

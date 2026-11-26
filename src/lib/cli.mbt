@@ -3,6 +3,17 @@
 // commands and identical JSON-lines output.
 
 ///|
+/// Process exit status for a command that printed an `error` JSON line: an
+/// unknown command, a missing option value, an input outside the domain, or a
+/// default parameter that cannot be appended.
+///
+/// Both entry points end with this status, so a shell script or an agent can
+/// test for failure instead of parsing the output. Before it existed every
+/// command exited 0, and `textkernel ... || exit 1` never ran. It differs from
+/// the abort status (134), which a `String`-returning function still uses.
+pub const CLI_USAGE_EXIT : Int32 = 2
+
+///|
 pub fn cli_help() -> String {
   "textkernel - verified text operations across a trust boundary\n\n" +
   "Usage:\n" +
@@ -15,8 +26,14 @@ pub fn cli_help() -> String {
   "  normalize-asset-url    force https and append default query params\n" +
   "  decide-referrer-policy choose a Referrer-Policy from the host allow-list\n" +
   "  str-contains           UTF-16 substring test, input is HAYSTACK|NEEDLE\n\n" +
-  "Output is one JSON line: {\"command\":\"...\",\"output\":\"...\"}.\n" +
-  "Without --hosts/--params the RFC 2606 example configuration is used.\n"
+  "Output is one JSON line: {\"command\":\"...\",\"output\":\"...\"} on success,\n" +
+  "or {\"command\":\"...\",\"error\":\"...\"} with exit status 2 on failure.\n" +
+  "--hosts takes host names without scheme, path or port; each matches the host\n" +
+  "itself and its subdomains. --params takes key=value pairs; & may join\n" +
+  "several in one argument. A pair that is empty, starts with =, or contains\n" +
+  "#, whitespace or a control character makes normalize-asset-url fail with\n" +
+  "\"Invalid Config\" for a URL on a configured host. Without --hosts/--params\n" +
+  "the RFC 2606 example configuration is used.\n"
 }
 
 ///|
@@ -108,7 +125,11 @@ pub fn run_cli(
     "escape-html" => Ok(escape_html_safe(input))
     "escape-attr" => Ok(escape_attr_safe(input))
     "sanitize-filename" => Ok(sanitize_filename_safe(input))
-    "normalize-asset-url" => Ok(normalize_asset_url_with_config(input, config))
+    "normalize-asset-url" =>
+      match normalize_asset_url_with_config_result(input, config) {
+        Ok(url) => Ok(url)
+        Err(e) => Err(error_to_string(e))
+      }
     "decide-referrer-policy" =>
       Ok(decide_referrer_policy_with_config(input, config))
     "str-contains" => {

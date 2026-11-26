@@ -2,7 +2,7 @@
 
 A formally verified MoonBit kernel for HTML escaping, filename sanitisation,
 URL rewriting and joined-list batch operations. Zero dependencies, four
-backends, 151 tests and 419 proof goals under the CI proof gate.
+backends, 193 tests and every proof goal discharged under the CI gate.
 
 ## Usage
 
@@ -13,8 +13,28 @@ let url = @lib.normalize_asset_url("http://cdn.example.com/a.png")
 let parts = @lib.split_joined("a|b|c", "|")
 ```
 
-`*_result` variants return `Result[T, CoreError]`. The shipping layer verifies
+`*_result` variants return `Result[T, CoreError]`. They accept the empty string
+and every input up to `MAX_SHIPPING_CODE_UNITS`. The shipping layer verifies
 its own output against the escape invariants before returning.
+
+Well-formed text passes through: a character outside the BMP (an emoji, a CJK
+Extension B ideograph) is copied whole by every routine. Only an unpaired
+surrogate half is replaced.
+
+`sanitize_filename` returns a name that can be created as a file on Linux,
+macOS and Windows: no directory reference such as `..`, no control character,
+no trailing dot or space, no device name such as `NUL.txt`.
+
+A host entry of `AssetConfig` is a host name. It matches that host and its
+subdomains of an `http`/`https` URL in any letter case, and nothing else; a
+missing default parameter goes before the `#fragment`.
+
+Default parameters are split on `&`. A piece that could change the structure
+of the URL is **refused, not skipped**: an empty piece, one starting with `=`,
+and one containing `#`, whitespace or a control character. For a URL on a
+configured host, the `*_result` functions return `Err(InvalidConfig(piece))`
+and the String-returning form aborts. A URL on any other host is returned
+unchanged and its parameters are not looked at.
 
 Pass an explicit `AssetConfig` to `*_with_config` to replace the example-domain
 allow-list and default query params without forking. The no-suffix functions
@@ -22,16 +42,18 @@ keep the historical defaults. The same operations are available as a CLI:
 
 ```bash
 moonx huanguan-Q/textkernel/src/main@0.1.4 -- escape-html '<script>x</script>'
-moon run src/cli --target native -- sanitize-filename < names.txt
+moon run src/cli --target native -- sanitize-filename --input 'a/b:c?.png'
 ```
 
 ## Verification
 
 Run `moon test --target all` and `node scripts/prove_gate.mjs` (10x solver
-limits in CI, 32-bit machine-integer model, 419 goals). A bare `moon prove`
-discharges 191 goals with the stock limits and may report timeouts.
-Re-verified 2026-11-22 on `moon 0.1.20261119`: 151/151 tests pass on all four
-backends. The proved kernels live in
+limits in CI, 32-bit machine-integer model). The gate is the verdict; the
+number of goals it reports, 355 or 488, depends on how they are split. A bare `moon prove` at the stock limits discharges 207 goals under the
+mathematical-integer model and reports 3 timeouts in the escape kernels; its
+outcome depends on solver timing. Re-verified 2026-11-25 on
+`moon 0.1.20261119`: 193/193 tests pass on all four backends. The proved
+kernels live in
 `src/proof` over UTF-16 code-unit arrays; `src/proof/conform.mbt` pins them to
 the shipped `String` API over an enumerated corpus. `src/lib` is not in the
 proof denominator because the prover has no `String` model — runtime invariant
@@ -39,13 +61,15 @@ checks cover that layer instead. Full boundaries are documented in `README.md`.
 
 ## Performance
 
-All three string builders use `StringBuilder`, so output construction is
-amortised O(n) on every backend. A legacy-vs-rewrite differential test
-(`string_builder_regression_test.mbt`) pins byte-for-byte equality.
+All three string builders and `join_joined` use a `StringBuilder`, so output
+construction is amortised O(n) on every backend. A reference-vs-rewrite
+differential test (`string_builder_regression_test.mbt`) pins byte-for-byte
+equality.
 
 ## Errors
 
-`*_result` returns `Result[String, CoreError]` and never aborts. The
+`*_result` returns `Result[String, CoreError]` and never aborts. It accepts the
+empty string and every input up to `MAX_SHIPPING_CODE_UNITS`. The
 String-returning API is a compatibility layer with an explicit
 `FailurePolicy` (`FailFast` / `EmptyOnError`); `*_safe` always uses the latter.
 

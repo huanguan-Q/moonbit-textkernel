@@ -143,6 +143,447 @@ pub fn rewrite_https_codes(
 }
 
 // ---------------------------------------------------------------------------
+// Scheme, authority and host
+//
+// The shipped allow-list is no longer a substring probe over the whole URL.
+// `normalize_asset_url` and `decide_referrer_policy` parse the URL, take its
+// authority, and compare the host of that authority with each configured
+// entry. The kernels below are the pieces of that test worth a proof;
+// `conform.mbt` composes them against the shipped functions over a corpus of
+// URLs and hosts.
+//
+// Not modelled here: the port after the host. `host_start_codes` does locate
+// the start of the host, after the user information; where the host ends is
+// covered by tests in `src/lib/url_structure_test.mbt`.
+// ---------------------------------------------------------------------------
+
+///|
+/// ASCII lower case of one code unit.
+///
+/// Proved: the result equals `ascii_lower(c)`.
+pub fn ascii_lower_codes(
+  c : Int32,
+) -> Int32 where {
+  proof_ensure: result => result == ascii_lower(c),
+} {
+  if ASCII_UPPER_A <= c && c <= ASCII_UPPER_Z {
+    c + ASCII_CASE_GAP
+  } else {
+    c
+  }
+}
+
+///|
+/// Does `src` start with `http://`, in any letter case?
+///
+/// Proved: the result is true exactly when `http_scheme_ci(src)` holds.
+pub fn scheme_is_http_codes(
+  src : FixedArray[Int32],
+) -> Bool where {
+  proof_ensure: result => (result == true) == http_scheme_ci(src),
+} {
+  if 7 <= src.length() {
+    if ascii_lower_codes(src[0]) == CH_LOWER_H {
+      if ascii_lower_codes(src[1]) == CH_LOWER_T {
+        if ascii_lower_codes(src[2]) == CH_LOWER_T {
+          if ascii_lower_codes(src[3]) == CH_LOWER_P {
+            if src[4] == CH_COLON {
+              if src[5] == CH_SLASH {
+                src[6] == CH_SLASH
+              } else {
+                false
+              }
+            } else {
+              false
+            }
+          } else {
+            false
+          }
+        } else {
+          false
+        }
+      } else {
+        false
+      }
+    } else {
+      false
+    }
+  } else {
+    false
+  }
+}
+
+///|
+/// Does `src` start with `https://`, in any letter case?
+///
+/// Proved: the result is true exactly when `https_scheme_ci(src)` holds.
+pub fn scheme_is_https_codes(
+  src : FixedArray[Int32],
+) -> Bool where {
+  proof_ensure: result => (result == true) == https_scheme_ci(src),
+} {
+  if 8 <= src.length() {
+    if ascii_lower_codes(src[0]) == CH_LOWER_H {
+      if ascii_lower_codes(src[1]) == CH_LOWER_T {
+        if ascii_lower_codes(src[2]) == CH_LOWER_T {
+          if ascii_lower_codes(src[3]) == CH_LOWER_P {
+            if ascii_lower_codes(src[4]) == CH_LOWER_S {
+              if src[5] == CH_COLON {
+                if src[6] == CH_SLASH {
+                  src[7] == CH_SLASH
+                } else {
+                  false
+                }
+              } else {
+                false
+              }
+            } else {
+              false
+            }
+          } else {
+            false
+          }
+        } else {
+          false
+        }
+      } else {
+        false
+      }
+    } else {
+      false
+    }
+  } else {
+    false
+  }
+}
+
+///|
+/// Does `c` end an authority?
+///
+/// Proved: the result is true exactly when `is_authority_end(c)` holds.
+pub fn is_authority_end_char(
+  c : Int32,
+) -> Bool where {
+  proof_ensure: result => (result == true) == is_authority_end(c),
+} {
+  c == CH_SLASH || c == CH_BACKSLASH || c == CH_QUESTION || c == CH_HASH
+}
+
+///|
+/// The first delimiter at or after `start`, or the end of `src`.
+///
+/// Proved: `authority_end_ok(src, start, result)` — no unit of
+/// `src[start .. result)` ends an authority, and `result` is either the end of
+/// `src` or the first unit that does. This is what makes
+/// `https://cdn.example.com\@evil.com/` the host `cdn.example.com`: the
+/// authority stops at the backslash, as it does in a browser.
+pub fn authority_end_codes(
+  src : FixedArray[Int32],
+  start : Int32,
+) -> Int32 where {
+  // Lengths are not known to be non-negative unless stated; without it the
+  // prover cannot rule out an empty scan that runs past a negative end.
+  proof_require: 0 <= src.length(),
+  proof_require: 0 <= start,
+  proof_require: start <= src.length(),
+  proof_ensure: result => authority_end_ok(src, start, result),
+} {
+  // The loop condition is a plain bound on purpose: the prover derives a loop
+  // variant from `i < src.length()` but not from a conjunction, and a loop
+  // without a variant has a termination obligation that never closes. So the
+  // scan does not stop at a delimiter; `stop` simply stops moving.
+  let mut stop = start
+  for i = start; i < src.length(); {
+    if stop == i && !is_authority_end_char(src[i]) {
+      stop = i + 1
+    }
+    continue i + 1
+  } nobreak {
+    ()
+  } where {
+    proof_invariant: start <= i,
+    proof_invariant: i <= src.length(),
+    proof_invariant: start <= stop,
+    proof_invariant: stop <= i,
+    proof_invariant: stop == i || is_authority_end(src[stop]),
+    proof_invariant: no_authority_end_before(src, start, stop),
+  }
+  proof_assert authority_end_ok(src, start, stop)
+  stop
+}
+
+///|
+/// The index just after the last `@` of `a`, or 0 when there is none.
+///
+/// Proved: `host_start_ok(a, result)` — no `@` follows `result`, and the unit
+/// before it is one (unless `result` is 0). The host of an authority begins
+/// there, so `cdn.example.com@evil.com` has the host `evil.com`.
+pub fn host_start_codes(
+  a : FixedArray[Int32],
+) -> Int32 where {
+  proof_require: 0 <= a.length(),
+  proof_ensure: result => host_start_ok(a, result),
+} {
+  let mut start = 0
+  for i = 0; i < a.length(); {
+    if a[i] == CH_AT {
+      start = i + 1
+    }
+    continue i + 1
+  } nobreak {
+    ()
+  } where {
+    proof_invariant: 0 <= i,
+    proof_invariant: i <= a.length(),
+    proof_invariant: 0 <= start,
+    proof_invariant: start <= i,
+    proof_invariant: start == 0 || a[start - 1] == CH_AT,
+    proof_invariant: no_at_from(a, start, i),
+  }
+  start
+}
+
+///|
+/// Is the tail of `s` from index `from` equal to `t`, ignoring ASCII letter case?
+///
+/// Proved: the result is true exactly when `ascii_ci_eq_from(s, from, t)` holds.
+pub fn ascii_ci_eq_from_codes(
+  s : FixedArray[Int32],
+  from : Int32,
+  t : FixedArray[Int32],
+) -> Bool where {
+  proof_require: 0 <= s.length(),
+  proof_require: 0 <= t.length(),
+  proof_require: 0 <= from,
+  proof_require: from <= s.length(),
+  // Machine-integer model: `from + j` must stay inside 32 bits.
+  proof_require: s.length() <= MAX_CODE_UNITS,
+  proof_require: t.length() <= MAX_CODE_UNITS,
+  proof_ensure: result => (result == true) == ascii_ci_eq_from(s, from, t),
+} {
+  if from + t.length() != s.length() {
+    false
+  } else {
+    let mut ok = true
+    for j = 0; j < t.length(); {
+      if ascii_lower_codes(s[from + j]) != ascii_lower_codes(t[j]) {
+        ok = false
+        break
+      }
+      continue j + 1
+    } nobreak {
+      ()
+    } where {
+      proof_invariant: 0 <= j,
+      proof_invariant: j <= t.length(),
+      proof_invariant: from + j <= s.length(),
+      proof_invariant: ok ==
+      (∀ jj : Int32,
+        0 <= jj && jj < j → ascii_lower(s[from + jj]) == ascii_lower(t[jj])),
+    }
+    ok
+  }
+}
+
+///|
+/// Is there room for a label in front of `entry`, and a dot right before it?
+///
+/// Proved: the result is true exactly when `dot_before_tail(host, entry)`
+/// holds.
+pub fn dot_before_tail_codes(
+  host : FixedArray[Int32],
+  entry : FixedArray[Int32],
+) -> Bool where {
+  proof_require: 0 <= host.length(),
+  proof_require: 0 <= entry.length(),
+  proof_require: host.length() <= MAX_CODE_UNITS,
+  proof_require: entry.length() <= MAX_CODE_UNITS,
+  proof_ensure: result => (result == true) == dot_before_tail(host, entry),
+} {
+  // `entry.length() > 0` is what shows the dot is read in bounds.
+  if entry.length() == 0 {
+    false
+  } else if host.length() >= entry.length() + 2 {
+    host[host.length() - entry.length() - 1] == CH_DOT
+  } else {
+    false
+  }
+}
+
+///|
+/// Do the last `entry.length()` units of `host` spell `entry`, letter case
+/// aside?
+///
+/// Proved: the result is true exactly when `tail_is_entry(host, entry)` holds.
+/// The caller must make sure `host` is at least as long as `entry`: there is
+/// no tail to compare otherwise.
+pub fn tail_is_entry_codes(
+  host : FixedArray[Int32],
+  entry : FixedArray[Int32],
+) -> Bool where {
+  proof_require: 0 <= host.length(),
+  proof_require: 0 <= entry.length(),
+  proof_require: entry.length() <= host.length(),
+  proof_require: host.length() <= MAX_CODE_UNITS,
+  proof_require: entry.length() <= MAX_CODE_UNITS,
+  proof_ensure: result => (result == true) == tail_is_entry(host, entry),
+} {
+  ascii_ci_eq_from_codes(host, host.length() - entry.length(), entry)
+}
+
+///|
+/// Is `host` a subdomain of `entry`: a whole label, a dot, and then `entry`?
+///
+/// Proved: the result is true exactly when `host_is_subdomain(host, entry)`
+/// holds.
+pub fn host_is_subdomain_codes(
+  host : FixedArray[Int32],
+  entry : FixedArray[Int32],
+) -> Bool where {
+  proof_require: 0 <= host.length(),
+  proof_require: 0 <= entry.length(),
+  proof_require: host.length() <= MAX_CODE_UNITS,
+  proof_require: entry.length() <= MAX_CODE_UNITS,
+  proof_ensure: result => (result == true) == host_is_subdomain(host, entry),
+} {
+  dot_before_tail_codes(host, entry) && tail_is_entry_codes(host, entry)
+}
+
+///|
+/// Is `host` `entry` itself or one of its subdomains?
+///
+/// Proved: the result is true exactly when `host_matches_entry(host, entry)`
+/// holds — the comparison ignores ASCII letter case, and a subdomain is a whole
+/// label followed by a dot and the entry.
+pub fn host_matches_entry_codes(
+  host : FixedArray[Int32],
+  entry : FixedArray[Int32],
+) -> Bool where {
+  proof_require: 0 <= host.length(),
+  proof_require: 0 <= entry.length(),
+  proof_require: host.length() <= MAX_CODE_UNITS,
+  proof_require: entry.length() <= MAX_CODE_UNITS,
+  proof_ensure: result => (result == true) == host_matches_entry(host, entry),
+} {
+  if entry.length() == 0 {
+    false
+  } else if ascii_ci_eq_from_codes(host, 0, entry) {
+    true
+  } else {
+    host_is_subdomain_codes(host, entry)
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Runtime evidence for the scheme, authority and host kernels
+//
+// As with the rejection paths above, a green `moon prove` says the kernels
+// satisfy their contracts; these tests show the contracts describe the
+// behaviour the shipped allow-list relies on.
+// ---------------------------------------------------------------------------
+
+///|
+test "url - the scheme test ignores letter case and nothing else" {
+  for url in ["http://a", "HTTP://a", "Http://cdn.example.com/x", "hTtP://"] {
+    assert_true(scheme_is_http_codes(codes_of_string(url)))
+  }
+  for url in ["https://a", "httpx://a", "http:/a", "http:/", "httpa//a", "xht"] {
+    assert_false(scheme_is_http_codes(codes_of_string(url)))
+  }
+  for url in ["https://a", "HTTPS://a", "Https://"] {
+    assert_true(scheme_is_https_codes(codes_of_string(url)))
+  }
+  for url in ["http://a", "httpsx://a", "https:/a", "https:/", "http://"] {
+    assert_false(scheme_is_https_codes(codes_of_string(url)))
+  }
+}
+
+///|
+test "url - the authority ends at the first delimiter" {
+  // (URL, authority) — the scheme is always `https://`, eight units.
+  let cases : Array[(String, String)] = [
+    ("https://cdn.example.com/a.png", "cdn.example.com"),
+    ("https://cdn.example.com", "cdn.example.com"),
+    ("https://cdn.example.com?x=1", "cdn.example.com"),
+    ("https://cdn.example.com#f", "cdn.example.com"),
+    ("https://cdn.example.com\\@evil.com/a.png", "cdn.example.com"),
+    ("https://", ""),
+    ("https://user@host:8080/p", "user@host:8080"),
+  ]
+  for i = 0; i < cases.length(); i = i + 1 {
+    let src = codes_of_string(cases[i].0)
+    let want = cases[i].1
+    let stop = authority_end_codes(src, 8)
+    assert_eq(stop - 8, want.length())
+    let mut same = true
+    for j = 0; j < want.length(); j = j + 1 {
+      if src[8 + j] != want[j].to_int() {
+        same = false
+      }
+    }
+    assert_true(same)
+  }
+  // Without a delimiter the authority runs to the end of the input; the first
+  // delimiter stops it, whichever of the four it is.
+  assert_eq(authority_end_codes(codes_of_string("abc"), 1), 3)
+  assert_eq(authority_end_codes(codes_of_string("a/c"), 0), 1)
+  assert_eq(authority_end_codes(codes_of_string("a?c"), 0), 1)
+  assert_eq(authority_end_codes(codes_of_string("a#c"), 0), 1)
+  assert_eq(authority_end_codes(codes_of_string("a\\c"), 0), 1)
+  // A scan that starts on a delimiter stops at once.
+  assert_eq(authority_end_codes(codes_of_string("a/c"), 1), 1)
+}
+
+///|
+test "url - the host starts after the last at sign" {
+  let cases : Array[(String, Int32)] = [
+    ("cdn.example.com", 0),
+    ("user@cdn.example.com", 5),
+    ("a@b@cdn.example.com", 4),
+    ("@", 1),
+    ("", 0),
+  ]
+  for i = 0; i < cases.length(); i = i + 1 {
+    assert_eq(host_start_codes(codes_of_string(cases[i].0)), cases[i].1)
+  }
+}
+
+///|
+test "url - the host rule ignores letter case and needs whole labels" {
+  let admitted : Array[(String, String)] = [
+    ("cdn.example.com", "cdn.example.com"),
+    ("CDN.EXAMPLE.COM", "cdn.example.com"),
+    ("cdn.example.com", "CDN.EXAMPLE.COM"),
+    ("sub.cdn.example.com", "cdn.example.com"),
+    ("sub.sub.CDN.example.com", "Cdn.Example.Com"),
+    ("x.con", "con"),
+  ]
+  for i = 0; i < admitted.length(); i = i + 1 {
+    let host = codes_of_string(admitted[i].0)
+    let entry = codes_of_string(admitted[i].1)
+    assert_true(host_matches_entry_codes(host, entry))
+    // Symmetry does not hold: the entry is not a subdomain of the host.
+    if admitted[i].0.length() != admitted[i].1.length() {
+      assert_false(host_matches_entry_codes(entry, host))
+    }
+  }
+  let refused : Array[(String, String)] = [
+    ("cdn.example.com.evil.com", "cdn.example.com"),
+    ("notcdn.example.com", "cdn.example.com"),
+    (".cdn.example.com", "cdn.example.com"),
+    ("cdn.example.co", "cdn.example.com"),
+    ("cdn.example.com", ""),
+    ("", "cdn.example.com"),
+    ("example.com", "cdn.example.com"),
+  ]
+  for i = 0; i < refused.length(); i = i + 1 {
+    let host = codes_of_string(refused[i].0)
+    let entry = codes_of_string(refused[i].1)
+    assert_false(host_matches_entry_codes(host, entry))
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Runtime evidence for the rejection paths
 //
 // `moon prove` discharges `has_http_scheme` over the whole input space, but that

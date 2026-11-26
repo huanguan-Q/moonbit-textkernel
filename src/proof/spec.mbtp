@@ -3,6 +3,15 @@
 //
 // Every numeric constant is imported from `codes.mbt`, so the specification and
 // the kernel cannot disagree about what `&` or `<` is.
+//
+// Two shapes of definition are used on purpose.
+//
+// * A `predicate` holds one formula. Disjunctions of parenthesised
+//   conjunctions are fine here.
+// * A `fn ... -> Bool` is written as a chain of `if` / `else { if ... }`
+//   whenever it has more than one case. The logic-side parser rejects
+//   `((a) && (b)) || ((c) && (d))` in that position, and it rejects `else if`
+//   everywhere; control flow removes the question (see `entity_at`).
 
 /// True when `c` is one of the nine characters `sanitize_filename` rewrites:
 /// `/ \ : * ? " < > |`
@@ -18,26 +27,124 @@ fn is_illegal_name_char(c : Int) -> Bool {
   (c == CH_PIPE)
 }
 
-/// True when `c` is an unpaired UTF-16 surrogate code unit.
+/// True when `c` is a C0 control character (U+0000..U+001F) or DEL (U+007F).
+fn is_control_char(c : Int) -> Bool {
+  if (0 <= c) && (c <= CONTROL_MAX) {
+    true
+  } else {
+    c == CH_DEL
+  }
+}
+
+/// True when `c` is a leading (high) surrogate code unit, U+D800..U+DBFF.
+fn is_high_surrogate(c : Int) -> Bool {
+  (SURROGATE_LO <= c) && (c <= HIGH_SURR_HI)
+}
+
+/// True when `c` is a trailing (low) surrogate code unit, U+DC00..U+DFFF.
+fn is_low_surrogate(c : Int) -> Bool {
+  (LOW_SURR_LO <= c) && (c <= SURROGATE_HI)
+}
+
+/// True when the code unit `src[i]` is half of a well-formed surrogate pair.
 ///
-/// `String::at` yields one code unit at a time, so a well-formed surrogate
-/// *pair* shows up as two separate lone halves here. Both are replaced, which
-/// is what the runtime `UInt16::to_char()` returning `None` does.
-fn is_lone_surrogate(c : Int) -> Bool {
-  (SURROGATE_LO <= c) && (c <= SURROGATE_HI)
+/// A leading surrogate is paired when the next unit is a trailing one; a
+/// trailing surrogate is paired when the previous unit is a leading one. A
+/// unit of any other kind is never "paired".
+///
+/// This is the unit of the rule the whole library follows: a character outside
+/// the BMP is two code units and is copied whole. The first version of the
+/// escaper specification replaced *every* surrogate unit with `_`, which the
+/// implementation, the tests and the proof all agreed on — and which turned an
+/// emoji into `__`. The specification was wrong, not the proof.
+fn paired_at(src : FixedArray[Int], i : Int) -> Bool {
+  if is_high_surrogate(src[i]) {
+    (i + 1 < src.length()) && is_low_surrogate(src[i + 1])
+  } else {
+    if is_low_surrogate(src[i]) {
+      (1 <= i) && is_high_surrogate(src[i - 1])
+    } else {
+      false
+    }
+  }
 }
 
-/// True when `sanitize_filename` must emit `_` instead of the input code unit.
-fn replaced_in_name(c : Int) -> Bool {
-  is_illegal_name_char(c) || is_lone_surrogate(c)
+/// True when `src[i]` is a surrogate code unit that does not belong to a
+/// well-formed pair. Only such a half is replaced by `_`.
+fn lone_surrogate_at(src : FixedArray[Int], i : Int) -> Bool {
+  if is_high_surrogate(src[i]) {
+    if paired_at(src, i) {
+      false
+    } else {
+      true
+    }
+  } else {
+    if is_low_surrogate(src[i]) {
+      if paired_at(src, i) {
+        false
+      } else {
+        true
+      }
+    } else {
+      false
+    }
+  }
 }
 
-/// Exact per-position contract of the filename sanitizer.
-fn sanitize_at(c : Int, out : Int) -> Bool {
-  if replaced_in_name(c) {
+/// `paired_at` for the first `n` units of `src`: a surrogate of the prefix is
+/// paired when its other half is inside the prefix too.
+fn paired_in_prefix(src : FixedArray[Int], n : Int, i : Int) -> Bool {
+  if is_high_surrogate(src[i]) {
+    (i + 1 < n) && is_low_surrogate(src[i + 1])
+  } else {
+    if is_low_surrogate(src[i]) {
+      (1 <= i) && is_high_surrogate(src[i - 1])
+    } else {
+      false
+    }
+  }
+}
+
+/// `lone_surrogate_at` for the first `n` units of `src`.
+fn lone_surrogate_in(src : FixedArray[Int], n : Int, i : Int) -> Bool {
+  if is_high_surrogate(src[i]) {
+    if paired_in_prefix(src, n, i) {
+      false
+    } else {
+      true
+    }
+  } else {
+    if is_low_surrogate(src[i]) {
+      if paired_in_prefix(src, n, i) {
+        false
+      } else {
+        true
+      }
+    } else {
+      false
+    }
+  }
+}
+
+/// True when the unit `src[i]` of a name of `n` units becomes `_`.
+fn name_char_replaced_at(src : FixedArray[Int], n : Int, i : Int) -> Bool {
+  if is_illegal_name_char(src[i]) {
+    true
+  } else {
+    if is_control_char(src[i]) {
+      true
+    } else {
+      lone_surrogate_in(src, n, i)
+    }
+  }
+}
+
+/// One step of the filename sanitizer: the unit written for `src[i]`.
+fn sanitize_step(src : FixedArray[Int], n : Int, i : Int, out : Int) -> Bool {
+  if name_char_replaced_at(src, n, i) {
     out == CH_UNDERSCORE
   } else {
-    out == c
+    out == src[i]
   }
 }
 
@@ -50,10 +157,42 @@ fn clamped_len(n : Int, cap : Int) -> Int {
   }
 }
 
-/// `dst[0 .. n)` is exactly the sanitized image of `src[0 .. n)`.
-predicate sanitized_prefix(src : FixedArray[Int], dst : FixedArray[Int], n : Int) {
-  (0 <= n) &&
-  (∀ i : Int, ((0 <= i) && (i < n)) → sanitize_at(src[i], dst[i]))
+/// The number of units of `src` the sanitizer keeps: `min(length, cap)`, one
+/// less when that cut would fall between the two halves of a surrogate pair.
+fn adjusted_len(src : FixedArray[Int], cap : Int) -> Int {
+  if (1 <= clamped_len(src.length(), cap)) &&
+    (clamped_len(src.length(), cap) < src.length()) &&
+    is_high_surrogate(src[clamped_len(src.length(), cap) - 1]) &&
+    is_low_surrogate(src[clamped_len(src.length(), cap)]) {
+    clamped_len(src.length(), cap) - 1
+  } else {
+    clamped_len(src.length(), cap)
+  }
+}
+
+/// Every unit of `src` is a dot, and there is at least one. `.`, `..` and `...`
+/// name directories; they are never file names.
+predicate all_dots(src : FixedArray[Int]) {
+  (0 < src.length()) &&
+  (∀ i : Int, ((0 <= i) && (i < src.length())) → (src[i] == CH_DOT))
+}
+
+/// `dst[0 .. upto)` is exactly the sanitized image of the first `upto` units of
+/// a name of `n` units.
+predicate sanitized_prefix(
+  src : FixedArray[Int],
+  dst : FixedArray[Int],
+  upto : Int,
+  n : Int,
+) {
+  (0 <= upto) &&
+  (∀ i : Int, ((0 <= i) && (i < upto)) → sanitize_step(src, n, i, dst[i]))
+}
+
+/// `dst` is the default name, `file`, cut to `cap` units.
+predicate is_default_name(dst : FixedArray[Int], cap : Int) {
+  (dst.length() == clamped_len(4, cap)) &&
+  (∀ i : Int, ((0 <= i) && (i < dst.length())) → (dst[i] == default_code(i)))
 }
 
 /// `dst[0 .. w)` contains no `<` and no `>`.
@@ -122,6 +261,136 @@ fn rewrite_ok(src : FixedArray[Int], dst : FixedArray[Int]) -> Bool {
   }
 }
 
+/// ASCII lower case of one code unit: `A`..`Z` become `a`..`z`, and nothing
+/// else changes. A host name has no other upper and lower case pair.
+fn ascii_lower(c : Int) -> Int {
+  if (ASCII_UPPER_A <= c) && (c <= ASCII_UPPER_Z) {
+    c + ASCII_CASE_GAP
+  } else {
+    c
+  }
+}
+
+/// `src` starts with `http://`, in any letter case.
+predicate http_scheme_ci(src : FixedArray[Int]) {
+  (7 <= src.length()) &&
+  (ascii_lower(src[0]) == CH_LOWER_H) &&
+  (ascii_lower(src[1]) == CH_LOWER_T) &&
+  (ascii_lower(src[2]) == CH_LOWER_T) &&
+  (ascii_lower(src[3]) == CH_LOWER_P) &&
+  (src[4] == CH_COLON) &&
+  (src[5] == CH_SLASH) &&
+  (src[6] == CH_SLASH)
+}
+
+/// `src` starts with `https://`, in any letter case.
+predicate https_scheme_ci(src : FixedArray[Int]) {
+  (8 <= src.length()) &&
+  (ascii_lower(src[0]) == CH_LOWER_H) &&
+  (ascii_lower(src[1]) == CH_LOWER_T) &&
+  (ascii_lower(src[2]) == CH_LOWER_T) &&
+  (ascii_lower(src[3]) == CH_LOWER_P) &&
+  (ascii_lower(src[4]) == CH_LOWER_S) &&
+  (src[5] == CH_COLON) &&
+  (src[6] == CH_SLASH) &&
+  (src[7] == CH_SLASH)
+}
+
+/// `c` ends an authority. `/`, `?` and `#` are the delimiters of a URL; a
+/// backslash is one too, because a browser reads it as a slash in an `http`
+/// URL, so `https://cdn.example.com\@evil.com/` has the host `cdn.example.com`.
+fn is_authority_end(c : Int) -> Bool {
+  if c == CH_SLASH {
+    true
+  } else {
+    if c == CH_BACKSLASH {
+      true
+    } else {
+      if c == CH_QUESTION {
+        true
+      } else {
+        c == CH_HASH
+      }
+    }
+  }
+}
+
+/// No unit of `src[start .. upto)` ends an authority.
+predicate no_authority_end_before(src : FixedArray[Int], start : Int, upto : Int) {
+  ∀ j : Int, ((start <= j) && (j < upto)) → (is_authority_end(src[j]) == false)
+}
+
+/// `stop` is the first delimiter at or after `start`, or the end of `src`:
+/// nothing before it is a delimiter, and either it is the end or it is one.
+predicate authority_end_ok(src : FixedArray[Int], start : Int, stop : Int) {
+  (start <= stop) &&
+  (stop <= src.length()) &&
+  no_authority_end_before(src, start, stop) &&
+  ((stop == src.length()) || is_authority_end(src[stop]))
+}
+
+/// The tail of `s` from index `from` equals `t`, ignoring ASCII letter case.
+///
+/// Stated as a relation rather than through a extracted array, so that the
+/// prover never has to reason about a second buffer.
+predicate ascii_ci_eq_from(s : FixedArray[Int], from : Int, t : FixedArray[Int]) {
+  (0 <= from) &&
+  ((from + t.length()) == s.length()) &&
+  (∀ j : Int, ((0 <= j) && (j < t.length())) →
+    (ascii_lower(s[from + j]) == ascii_lower(t[j])))
+}
+
+/// `host` is long enough to hold a label in front of `entry`, and the unit just
+/// in front of where `entry` would end is a dot.
+///
+/// The dot is what keeps `cdn.example.com.evil.com` and `notcdn.example.com`
+/// out: a subdomain must end in `.entry`, not merely in `entry`.
+predicate dot_before_tail(host : FixedArray[Int], entry : FixedArray[Int]) {
+  (0 < entry.length()) &&
+  ((entry.length() + 2) <= host.length()) &&
+  (host[host.length() - entry.length() - 1] == CH_DOT)
+}
+
+/// The last `entry.length()` units of `host` equal `entry`, ignoring ASCII
+/// letter case.
+predicate tail_is_entry(host : FixedArray[Int], entry : FixedArray[Int]) {
+  ascii_ci_eq_from(host, host.length() - entry.length(), entry)
+}
+
+/// `host` is a subdomain of `entry`: a whole label, a dot, and then `entry`.
+predicate host_is_subdomain(host : FixedArray[Int], entry : FixedArray[Int]) {
+  dot_before_tail(host, entry) && tail_is_entry(host, entry)
+}
+
+/// `host` is `entry` itself or one of its subdomains.
+///
+/// Both halves ignore ASCII letter case, which is what lets `CDN.EXAMPLE.COM`
+/// in. The rule is cut into the three facts above on purpose, so that one
+/// kernel decides one comparison. Measured on this toolchain: a single kernel
+/// that reads the dot and compares the tail makes the solver time out on its
+/// last path, at any limit, although the path is a propositional consequence
+/// of its hypotheses. With one comparison per kernel every path closes in
+/// milliseconds. Do not merge them back.
+predicate host_matches_entry(host : FixedArray[Int], entry : FixedArray[Int]) {
+  (0 < entry.length()) &&
+  (ascii_ci_eq_from(host, 0, entry) || host_is_subdomain(host, entry))
+}
+
+/// `start` is the index just after the last `@` of `a`, or 0 when there is
+/// none. The host of an authority begins there: `user@cdn.example.com` has the
+/// host `cdn.example.com`, and `cdn.example.com@evil.com` has `evil.com`.
+predicate host_start_ok(a : FixedArray[Int], start : Int) {
+  (0 <= start) &&
+  (start <= a.length()) &&
+  (∀ j : Int, ((start <= j) && (j < a.length())) → (a[j] != CH_AT)) &&
+  ((start == 0) || (a[start - 1] == CH_AT))
+}
+
+/// No unit of `a[from .. upto)` is an `@`.
+predicate no_at_from(a : FixedArray[Int], from : Int, upto : Int) {
+  ∀ j : Int, ((from <= j) && (j < upto)) → (a[j] != CH_AT)
+}
+
 /// The `i`-th code unit of the `"file"` fallback: `f`, `i`, `l`, `e`.
 fn default_code(i : Int) -> Int {
   if i == 0 {
@@ -188,9 +457,9 @@ fn https_code(i : Int) -> Int {
 ///
 /// So the only way to spell five disjuncts of conjunctions is to leave the
 /// conjunctions unparenthesised and let `&&` bind tighter than `||`. That makes
-/// the meaning of the formula depend on operator precedence, with nothing in the
-/// toolchain pinning it: no lint, no test, and the explicit form cannot even be
-/// written down as a cross-check.
+/// the meaning of the formula depend on operator precedence, with nothing in
+/// the toolchain pinning it: no lint, no test, and the explicit form cannot even
+/// be written down as a cross-check.
 ///
 /// Control flow removes the question. A chain of `if c_i { true }` branches is
 /// `c1 || c2 || ...` by construction, each `c_i` is a flat `&&` conjunction (no
@@ -250,14 +519,14 @@ predicate entities_ok_prefix(dst : FixedArray[Int], w : Int) {
 
 /// Width of the HTML escape of one code unit: 5 for `&amp;`, 4 for `&lt;` /
 /// `&gt;`, 1 for everything else.
-fn html_width(c : Int) -> Int {
-  if c == CH_AMP {
+fn html_width_at(src : FixedArray[Int], i : Int) -> Int {
+  if src[i] == CH_AMP {
     5
   } else {
-    if c == CH_LT {
+    if src[i] == CH_LT {
       4
     } else {
-      if c == CH_GT {
+      if src[i] == CH_GT {
         4
       } else {
         1
@@ -266,38 +535,41 @@ fn html_width(c : Int) -> Int {
   }
 }
 
-/// `dst[k .. k + html_width(c))` holds exactly the HTML escape of `c`.
+/// `dst[k .. k + width)` holds exactly the HTML escape of `src[i]`.
 ///
 /// This is the functional counterpart of `no_markup_prefix`. That predicate only
 /// says the output contains no `<` or `>`; this one says which bytes must be
 /// there. An escaper that emitted `_` for every unit satisfies the former and
 /// violates the latter, which is why the kernels assert this per unit.
 ///
+/// The last two disjuncts are the surrogate rule. A unit that is half of a
+/// well-formed pair is copied as it is; an unpaired half becomes `_`.
+///
 /// Note the disjunction is over the *input* character, so the case split is
-/// driven by `c`, not by `dst`: the prover only ever has to match one branch.
-predicate html_at(dst : FixedArray[Int], k : Int, c : Int) {
-  ((c == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
-  ((c == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
-  ((c == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
-  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (SURROGATE_LO <= c) && (c <= SURROGATE_HI) && (dst[k] == CH_UNDERSCORE)) ||
-  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && ((c < SURROGATE_LO) || (SURROGATE_HI < c)) && (dst[k] == c))
+/// driven by `src[i]`, not by `dst`: the prover only ever has to match one branch.
+predicate html_at(dst : FixedArray[Int], k : Int, src : FixedArray[Int], i : Int) {
+  ((src[i] == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
+  ((src[i] == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((src[i] == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((src[i] != CH_AMP) && (src[i] != CH_LT) && (src[i] != CH_GT) && lone_surrogate_at(src, i) && (dst[k] == CH_UNDERSCORE)) ||
+  ((src[i] != CH_AMP) && (src[i] != CH_LT) && (src[i] != CH_GT) && (lone_surrogate_at(src, i) == false) && (dst[k] == src[i]))
 }
 
 /// Width of the attribute-context escape of one code unit.
-fn attr_width(c : Int) -> Int {
-  if c == CH_AMP {
+fn attr_width_at(src : FixedArray[Int], i : Int) -> Int {
+  if src[i] == CH_AMP {
     5
   } else {
-    if c == CH_LT {
+    if src[i] == CH_LT {
       4
     } else {
-      if c == CH_GT {
+      if src[i] == CH_GT {
         4
       } else {
-        if c == CH_DQUOTE {
+        if src[i] == CH_DQUOTE {
           6
         } else {
-          if c == CH_SQUOTE {
+          if src[i] == CH_SQUOTE {
             5
           } else {
             1
@@ -308,16 +580,16 @@ fn attr_width(c : Int) -> Int {
   }
 }
 
-/// `dst[k .. k + attr_width(c))` holds exactly the attribute-context escape of
-/// `c`.
-predicate attr_at(dst : FixedArray[Int], k : Int, c : Int) {
-  ((c == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
-  ((c == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
-  ((c == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
-  ((c == CH_DQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 113) && (dst[k + 2] == 117) && (dst[k + 3] == 111) && (dst[k + 4] == CH_LOWER_T) && (dst[k + 5] == CH_SEMI)) ||
-  ((c == CH_SQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 35) && (dst[k + 2] == 51) && (dst[k + 3] == 57) && (dst[k + 4] == CH_SEMI)) ||
-  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (c != CH_DQUOTE) && (c != CH_SQUOTE) && (SURROGATE_LO <= c) && (c <= SURROGATE_HI) && (dst[k] == CH_UNDERSCORE)) ||
-  ((c != CH_AMP) && (c != CH_LT) && (c != CH_GT) && (c != CH_DQUOTE) && (c != CH_SQUOTE) && ((c < SURROGATE_LO) || (SURROGATE_HI < c)) && (dst[k] == c))
+/// `dst[k .. k + width)` holds exactly the attribute-context escape of
+/// `src[i]`.
+predicate attr_at(dst : FixedArray[Int], k : Int, src : FixedArray[Int], i : Int) {
+  ((src[i] == CH_AMP) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_A) && (dst[k + 2] == CH_LOWER_M) && (dst[k + 3] == CH_LOWER_P) && (dst[k + 4] == CH_SEMI)) ||
+  ((src[i] == CH_LT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_L) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((src[i] == CH_GT) && (dst[k] == CH_AMP) && (dst[k + 1] == CH_LOWER_G) && (dst[k + 2] == CH_LOWER_T) && (dst[k + 3] == CH_SEMI)) ||
+  ((src[i] == CH_DQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 113) && (dst[k + 2] == 117) && (dst[k + 3] == 111) && (dst[k + 4] == CH_LOWER_T) && (dst[k + 5] == CH_SEMI)) ||
+  ((src[i] == CH_SQUOTE) && (dst[k] == CH_AMP) && (dst[k + 1] == 35) && (dst[k + 2] == 51) && (dst[k + 3] == 57) && (dst[k + 4] == CH_SEMI)) ||
+  ((src[i] != CH_AMP) && (src[i] != CH_LT) && (src[i] != CH_GT) && (src[i] != CH_DQUOTE) && (src[i] != CH_SQUOTE) && lone_surrogate_at(src, i) && (dst[k] == CH_UNDERSCORE)) ||
+  ((src[i] != CH_AMP) && (src[i] != CH_LT) && (src[i] != CH_GT) && (src[i] != CH_DQUOTE) && (src[i] != CH_SQUOTE) && (lone_surrogate_at(src, i) == false) && (dst[k] == src[i]))
 }
 
 /// The exact value `safe_batch_size` must return, as a two-branch fact.

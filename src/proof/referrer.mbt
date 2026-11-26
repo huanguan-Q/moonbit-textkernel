@@ -1,62 +1,69 @@
 // Kernel for the referrer-policy decision.
 //
-// `@lib.decide_referrer_policy` is a two-host substring test mapped onto one of
-// two header values. It is small, but it is the whole reason an image request
-// carries `no-referrer-when-downgrade` or `no-referrer`, and the two host
-// strings are easy to mistype or to extend inconsistently. The kernel below
-// proves that the decision is exactly "hay contains either host", so the
-// shipped function's only remaining freedom is the wording it returns.
+// `@lib.decide_referrer_policy` decides whether a URL's host is in the
+// allow-list and maps that onto one of two header values. The host test is the
+// same one `normalize_asset_url` applies, so the two shipped functions cannot
+// disagree about what an asset host is.
 //
-// The decision does not get its own `.mbtp`: `contains_somewhere` already names
-// the two queries it is built from, and inlining them into the postcondition
-// shows the composition without introducing a predicate that would just restate
-// this one line.
+// The kernel works on the *host*, the part of the authority after the last
+// `@`: it proves that the decision is exactly "the host is one of the configured
+// hosts or a subdomain of it". Taking the host out of the URL is the job of
+// `authority_end_codes` and `host_start_codes` in `url.mbt`, and of the shipped
+// parser; `conform.mbt` composes the pieces against the shipped function.
+//
+// The first version of this kernel proved "the whole URL contains the host
+// string", which is what the shipped gate did at the time. That rule let
+// `https://cdn.example.com.evil.com/` through, so both were replaced.
 
 ///|
-/// Does `hay` contain either asset host host?
+/// Does `host` match either of the two asset hosts?
 ///
-/// True exactly when one of the two hosts occurs in `hay`, which is the
-/// condition `decide_referrer_policy` maps to `no-referrer-when-downgrade`.
+/// Proved: the result is true exactly when the host rule admits `host_a` or
+/// `host_b`, which is the condition `decide_referrer_policy` maps to
+/// `no-referrer-when-downgrade`.
 pub fn referrer_downgrade_codes(
-  hay : FixedArray[Int32],
+  host : FixedArray[Int32],
   host_a : FixedArray[Int32],
   host_b : FixedArray[Int32],
 ) -> Bool where {
-  proof_require: hay.length() <= MAX_CODE_UNITS,
-  proof_require: host_a.length() <= MAX_CODE_UNITS,
-  proof_require: host_b.length() <= MAX_CODE_UNITS,
-  proof_require: 0 <= hay.length(),
+  proof_require: 0 <= host.length(),
   proof_require: 0 <= host_a.length(),
   proof_require: 0 <= host_b.length(),
+  proof_require: host.length() <= MAX_CODE_UNITS,
+  proof_require: host_a.length() <= MAX_CODE_UNITS,
+  proof_require: host_b.length() <= MAX_CODE_UNITS,
   proof_ensure: result => {
     (result == true) ==
-    (contains_somewhere(hay, host_a) || contains_somewhere(hay, host_b))
+    (host_matches_entry(host, host_a) || host_matches_entry(host, host_b))
   },
 } {
-  if str_contains_codes(hay, host_a) {
+  if host_matches_entry_codes(host, host_a) {
     true
   } else {
-    str_contains_codes(hay, host_b)
+    host_matches_entry_codes(host, host_b)
   }
 }
 
 ///|
-test "referrer - the decision is the disjunction, on a small grid" {
-  let hosts = ["cdn.example.com", "assets.example.org"]
-  let haystacks : Array[String] = [
-    "", "cdn.example.com", "assets.example.org", "https://cdn.example.com/a.png",
-    "https://assets.example.org/b.png", "https://example.com/c.png", "https://cdn.example.com.evil.com/d.png",
-    "CDN.EXAMPLE.COM", "https://example.com/?u=cdn.example.com",
+test "referrer - the decision is the host rule, on a small grid" {
+  let host_a = codes_of_string("cdn.example.com")
+  let host_b = codes_of_string("assets.example.org")
+  let admitted = [
+    "cdn.example.com", "CDN.EXAMPLE.COM", "sub.cdn.example.com", "assets.example.org",
+    "img.assets.example.org",
   ]
-  let h1 = hosts[0]
-  let h2 = hosts[1]
-  for hay in haystacks {
-    let kernel = referrer_downgrade_codes(
-      codes_of_string(hay),
-      codes_of_string(h1),
-      codes_of_string(h2),
+  for host in admitted {
+    assert_true(referrer_downgrade_codes(codes_of_string(host), host_a, host_b))
+  }
+  // A look-alike is refused on each side of the host: a suffix that is not a
+  // whole label, a prefix, and the host of another name.
+  let refused = [
+    "", "cdn.example", "cdn.example.com.evil", "cdn.example.com.evil.com", "mmeco.example.org",
+    "assets.example.org.example.com", "notcdn.example.com",
+  ]
+  for host in refused {
+    assert_false(
+      referrer_downgrade_codes(codes_of_string(host), host_a, host_b),
     )
-    let expected = @lib.str_contains(hay, h1) || @lib.str_contains(hay, h2)
-    assert_eq(kernel, expected)
   }
 }

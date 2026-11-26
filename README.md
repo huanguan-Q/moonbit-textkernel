@@ -13,27 +13,43 @@
 When a program takes a string from one system and puts it into another — into
 HTML, into a filename, into a URL, into a batch API — four things can go wrong:
 markup can be injected, a filename can escape its directory, a URL can be
-rewritten incorrectly, and a batch loop can drop an item. `textkernel` is the
-set of routines for those four jobs, with the safety properties discharged by
-`moon prove` rather than by inspection.
+rewritten incorrectly, and a batch loop can drop an item. `textkernel` is
+the set of routines for those four jobs, with the safety properties of their
+code-unit kernels discharged by `moon prove` rather than by inspection.
+
+One rule runs through all of them: **well-formed text passes through.** A
+character outside the BMP — an emoji, a CJK Extension B ideograph — is one
+character and is copied whole. Only an unpaired surrogate half is replaced.
 
 ```
-huanguan-Q/textkernel    151 tests × 4 backends    419 proof goals    13 WASM API exports (+ `_start`)    zero deps
+huanguan-Q/textkernel    193 tests × 4 backends    every proof goal discharged    13 WASM API exports (+ `_start`)    zero deps
 ```
 
 ## What is in the box
 
 | Routine | What it guarantees |
 |---|---|
-| `escape_html` / `escape_attr` | Output contains no raw `<` `>` (nor `"` `'` for attributes); every `&` starts a complete entity the library emits |
-| `sanitize_filename` | Replaces the nine unsafe characters and lone surrogates, clamps to 120 code units, never returns empty |
-| `normalize_asset_url` | Forces `https` for configured hosts and appends missing default query params; the tail is carried over verbatim |
-| `decide_referrer_policy` | Picks a Referrer-Policy from a configured host allow-list |
+| `escape_html` / `escape_attr` | Output contains no raw `<` `>` (nor `"` `'` for attributes); every `&` starts a complete entity the library emits; every other character is copied as it is |
+| `sanitize_filename` | Replaces the nine reserved characters, control characters and unpaired surrogate halves; never returns a directory reference such as `..`, a trailing dot or space, or a Windows device name; clamps to 120 code units without cutting a character; never returns empty |
+| `normalize_asset_url` | For an `http`/`https` URL whose host is configured, or is a subdomain of one: forces `https` and appends the missing default params to the query, before any `#fragment`. Any other URL is returned unchanged |
+| `decide_referrer_policy` | Picks a Referrer-Policy with the same host test `normalize_asset_url` uses |
 | `str_contains` | UTF-16 code-unit substring test (the host gate above) |
 | `split_joined` / `join_joined` | Exact inverse pair for batch calls; slices by code unit so non-BMP characters survive |
-| `batch_process_custom` | Applies an operation in bounded chunks; a non-positive chunk size is clamped to 1, never divided by |
+| `batch_process_custom` | Applies an operation in bounded chunks; a non-positive chunk size is clamped to 1, never divided by, and no chunk size can drop an item |
 
-`*_result` variants return `Result[T, CoreError]` with an explicit input bound.
+Default parameters are split on `&`. A piece that could change the structure
+of the URL is **refused, not skipped**: an empty piece, one starting with `=`,
+and one containing `#`, whitespace or a control character. For a URL on a
+configured host, `normalize_asset_url_with_config_result` returns
+`Err(InvalidConfig(piece))` and names the piece; the String-returning form
+aborts. A URL the configuration does not apply to is returned unchanged, and
+its parameters are not looked at, so a program that serves only its own hosts
+is not stopped by a piece it would never append. An empty value (`k=`) is a
+plain parameter.
+
+`*_result` variants return `Result[T, CoreError]`. They accept the empty
+string and every input up to `MAX_SHIPPING_CODE_UNITS` (8,000,000 code
+units), and return `Err(InputTooLarge)` beyond it.
 The shipping layer also checks its own output against the invariants before
 returning and aborts on violation — a regression fails loudly instead of
 quietly emitting markup the caller believes is escaped.
@@ -43,9 +59,9 @@ quietly emitting markup the caller believes is escaped.
 ```bash
 moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
-moon test --target all                    # 151/151 on each backend
-moon prove                               # 191 goals with the stock solver limits
-node scripts/prove_gate.mjs              # 419 goals, 10x solver limits in CI, machine-int model
+moon test --target all                    # 193/193 on each backend
+moon prove                               # 207 goals at the stock solver limits; 3 report a timeout
+node scripts/prove_gate.mjs              # every goal; 10x solver limits in CI, machine-int model
 moon run src/demo --target native        # runnable example
 moon package --list                      # validate package contents without releasing
 node scripts/build_wasm.mjs              # build wasm/textkernel.wasm
@@ -53,15 +69,22 @@ node examples/wasm-node/demo.mjs         # call the WASM exports from JavaScript
 node examples/wasm-node/render.mjs       # downstream consumer example
 ```
 
-Two proof counts appear above because they answer different questions: the
-stock `moon prove` run discharges 191 goals, while `scripts/prove_gate.mjs`
-retries at higher solver limits (5x by default, 10x in CI) under the 32-bit
-machine-integer prelude and discharges 419. The gate is what CI uses; the extra
-budget is needed because the newest CLI leaves one goal timing out at 5x.
+Two proof counts appear above because they answer different questions. The
+stock `moon prove` run uses the mathematical-integer prelude and short solver
+limits: it discharges 207 goals and leaves 3 timing out, in the escape kernels.
+`scripts/prove_gate.mjs` retries at higher solver limits (5x by default, 10x in
+CI) under the 32-bit machine-integer prelude and proves every goal. **The gate
+is the verdict** and it is what CI uses. The number it reports is not a
+contract: across five clean runs it was 355 three times and 488 twice, because
+`split_vc` cuts a goal differently depending on solver timing. What has to hold
+is `1 of 1 packages proved` with nothing left unproved. A stock run that reports timeouts is
+not a regression by itself: its outcome depends on solver timing, and the same
+kernels had a goal at the stock limits before that z3 alone could not close.
 
-Toolchain used to produce the numbers above: `moon 0.1.20261104`, Why3 1.7.2,
-z3. The proof verdicts depend on the VC generator, so pin the toolchain when
-reproducing; the historical pin is kept here for provenance.
+Toolchain used to produce the numbers above: `moon 0.1.20261119`, Why3 1.7.2,
+Z3 4.15.4, Alt-Ergo 2.4.3, re-verified 2026-11-25 after the URL and filename
+rules were added. The proof verdicts depend on the VC generator, so pin the
+toolchain when reproducing.
 
 Re-verified 2026-11-19 on the local toolchain `moon 0.1.20261117 (eb64713)`:
 146/146 tests pass on all four backends, `moon prove` discharges 191 goals,
@@ -78,6 +101,15 @@ default 5x budget reports 425 goals proved with 1 timeout and fails, while
 `PROVE_TIME_SCALE=10` proves all 419 goals. CI therefore uses the 10x budget.
 Treat the proof result as environment-sensitive and do not bump the prover
 without re-establishing the gate.
+
+Update 2026-11-25, after the URL and filename rules were reworked: format,
+check and all 190x4 tests are green, `PROVE_TIME_SCALE=10` proves every goal,
+and a stock `moon prove` proves 207 and reports 3 timeouts. The gate's goal
+count moved from 419 to 355–488 with the shape of the kernels. Three contracts
+were changed on purpose — the per-unit escape rule, the sanitizer's character
+rule and length, and the referrer decision — and kernels were added for the
+scheme test, the end of the authority, the start of the host and the dot-only
+rule.
 
 ## Use
 
@@ -97,7 +129,9 @@ See `src/demo/main.mbt` for a complete runnable example and
 
 ## Explicit configuration and CLI
 
-Host allow-lists and default query parameters are data, not source constants:
+Host allow-lists and default query parameters are data, not source constants.
+A host entry is a host name — no scheme, path or port — and matches that host
+and its subdomains in any letter case:
 
 ```moonbit
 let config = @lib.create_asset_config(
@@ -119,11 +153,31 @@ The same operations are available as a CLI with JSON-lines output:
 ```bash
 moonx huanguan-Q/textkernel/src/main@0.1.4 -- --help
 moonx huanguan-Q/textkernel/src/main@0.1.4 -- escape-html '<script>x</script>'
-moon run src/cli --target native -- sanitize-filename < names.txt
+moon run src/cli --target native -- sanitize-filename --input 'a/b:c?.png'
+moon run src/cli --target native -- sanitize-filename < name.txt
 ```
+
+The native CLI reads stdin as **one** input, not as a stream of lines. To
+process a list, call it once per line.
 
 Use the explicit `src/main` package path for moonx: the bare module coordinate
 has no prebuilt Wasm asset on mooncakes.io.
+
+The CLI prints one JSON line and its **exit status tells success from failure**:
+`0` with an `output` line, `2` with an `error` line. Both entry points behave
+the same, so a script or an agent can test the status instead of parsing the
+output:
+
+```bash
+moonx huanguan-Q/textkernel/src/main@0.1.4 -- normalize-asset-url \
+  --hosts cdn.example.com --params 'fmt=png,x#y' https://cdn.example.com/a.png
+# {"command":"normalize-asset-url","error":"Invalid Config: x#y"}   exit status 2
+```
+
+`--params` holds comma-separated pairs, and `&` may join several in one pair.
+A pair that is empty, starts with `=`, or contains `#`, whitespace or a control
+character is refused for a URL on a configured host. An unknown command and a
+missing option value also exit with `2`.
 
 ## WASM / calling from JavaScript
 
@@ -139,7 +193,7 @@ copy:
 | `escape_html_safe`, `escape_attr_safe`, `sanitize_filename_safe` | — never-fail variants |
 
 ```bash
-node scripts/build_wasm.mjs        # ~23 KB artefact after the CLI entry point; verifies 13 API exports (+ `_start`)
+node scripts/build_wasm.mjs        # ~27 KB artefact; verifies 13 API exports (+ `_start`)
 node examples/wasm-node/demo.mjs   # assertions across all 13 API exports
 node examples/wasm-node/render.mjs # realistic downstream consumer
 ```
@@ -158,10 +212,13 @@ example again, so a stale artefact cannot claim to be working code.
 ## Error handling
 
 **The production path never aborts.** The `*_result` variants return
-`Result[String, CoreError]` and cover both failure sources: an input outside
-the shipping domain (`InputTooLarge`) and a violated output invariant
-(`InvariantViolation`). `CoreError` carries both alongside the original
-`InvalidInput` / `PerformanceWarning`; `error_to_string` renders all four.
+`Result[String, CoreError]` and cover every failure source: an input outside
+the shipping domain (`InputTooLarge`), a violated output invariant
+(`InvariantViolation`), and a default parameter that cannot be appended
+(`InvalidConfig`). `CoreError` also carries `InvalidInput` and
+`PerformanceWarning`; only `validate_string_input` produces them. Every tier
+enforces the same bound, `MAX_SHIPPING_CODE_UNITS`, and treats the empty string
+as a valid input.
 
 The String-returning `escape_html` / `escape_attr` / `sanitize_filename` are a
 **compatibility layer** kept for existing callers and the WASM ABI. They route
@@ -207,6 +264,24 @@ explicit policy choice instead of the only behaviour available.
 - The host allow-list and default query params are **data**, passed through
   `AssetConfig`. The no-suffix functions keep the historical RFC 2606 example
   domains (`cdn.example.com`, `assets.example.org`) as a compatibility default.
+- **Not every rule of the URL and filename routines is proved.** Proved: the
+  scheme test, where the authority ends, where the host starts, the host rule,
+  the filename character rule, its clamp and its dot-only rule. Not proved, and
+  covered by tests and the runtime invariant instead: stripping the port from a
+  host, trailing dots and spaces, Windows device names.
+- **A proof is about its specification, not about the intent.** The first
+  specification of the escapers replaced every surrogate unit, and the proof,
+  the implementation and the tests all agreed — an emoji became `__`. The
+  specification was wrong. Read `spec.mbtp` as the statement of what is proved.
+- **A precondition is the caller's obligation.** `batch_ceil` is proved for a
+  chunk size of at most `MAX_CODE_UNITS`. The shipped loop used to pass it any
+  `Int32`, and a size near the maximum silently dropped the list. It now keeps
+  the size inside the proved domain.
+- **A lone surrogate half cannot occur in a MoonBit corpus.** The compiler
+  rejects `"\u{D800}"` and slicing snaps to character boundaries. Such a half
+  can only arrive from a host that passes ill-formed UTF-16; the kernels are
+  driven on raw code units, and `examples/wasm-node/demo.mjs` sends one through
+  the WASM exports from JS.
 - **No verified third-party adoption yet.** There are no downstream dependents
   outside this repository's own examples. `ssr-middleware.mjs` shows the shape
   a consumer would write; it is not evidence of adoption.
@@ -233,11 +308,16 @@ the work cannot be optimised away) stays linear: 0.63 s / 0.90 s / 2.35 s for
 unchanged: 0.12 s / 0.34 s for 20k / 80k at 100 rounds.
 
 Output is byte-for-byte identical. `src/lib/string_builder_regression_test.mbt`
-keeps the original implementations as private oracles and asserts equality over
+restates the contract with plain concatenation and asserts equality over
 an enumerated corpus plus 200 deterministic pseudo-random strings, on all four
-backends. The proof kernels and their 419 goals are untouched — they operate on
-code-unit arrays, and `src/proof/conform.mbt` still pins them to the shipped
-String API.
+backends. The proof kernels operate on code-unit arrays, and
+`src/proof/conform.mbt` still pins them to the shipped String API.
+
+The joined-list path had the same quadratic concatenation in `join_joined`, and
+it went unnoticed because JS hosts make string concatenation cheap. On the
+native backend 1,000 items took 32 ms and each doubling of the list took about
+four times as long (16,000 items: 2.2 s). With a `StringBuilder` the same run
+takes 21 ms for 1,000 items and 31 ms for 16,000.
 
 To reproduce, export the tree with `git archive HEAD`, build a small release
 executable that calls `escape_html` N times over a string grown by doubling

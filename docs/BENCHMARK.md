@@ -41,6 +41,37 @@ plus 200 deterministic pseudo-random strings. Proof kernels were untouched:
 they operate on code-unit arrays and `src/proof/conform.mbt` still pins them to
 the shipped `String` API.
 
+## Joined lists: quadratic concatenation in `join_joined`
+
+The fix above covered the three builders and missed the batch glue.
+`join_joined` still concatenated in a loop (`out = out + sep + item`), so the
+joined-list path — `split_joined`, escape each element, `join_joined` — was
+quadratic on the native backend. It went unnoticed because JS hosts make
+string concatenation cheap: the same path is linear there.
+
+Measured after the fix on `moon 0.1.20261119`, native release, 80-character
+comments joined with `|`; best of five, including process start:
+
+| Items | Before | After |
+|---:|---:|---:|
+| 1,000 | 32 ms | 21 ms |
+| 4,000 | 142 ms | 22 ms |
+| 16,000 | 2,245 ms | 31 ms |
+| 64,000 | not measured | 63 ms |
+
+Each doubling of the list used to take about four times as long; it now takes
+a few milliseconds more.
+
+## Throughput of the escapers
+
+400 escapes (200 × `escape_html` and 200 × `escape_attr`) over 524,288 UTF-16
+units of mixed HTML and CJK text, native release, net of a baseline that only
+reads the length: about 450 MB/s, counting two bytes per code unit. The
+surrogate pairing test costs about 3%; a fast path for the units below the
+surrogate block keeps it that low. In a JS host the same WASM exports reach
+125–160 MB/s where a plain `String.replace` reaches 280–325 MB/s, so the WASM
+artefact is not the way to make a JS program faster.
+
 ## Reproduce
 
 ```bash
@@ -50,11 +81,11 @@ node examples/wasm-node/demo.mjs
 node examples/wasm-node/ssr-middleware.mjs
 ```
 
-To rebuild the timing harness, export the tree with `git archive HEAD`, compile
-a small release executable that calls `escape_html` N times over a string grown
-by doubling `"a<&>x"`, and time it with `/usr/bin/time -p`. Subtract a baseline
-variant that only measures `input.length()` to remove process startup, and use
-the identical harness before and after a change.
+To rebuild the timing harness, export the tree with `git archive HEAD`, add a
+small executable package that builds N copies of a string, joins them, splits
+them, escapes each and joins again, build it with
+`moon build --target native --release`, and time it with `/usr/bin/time -p`.
+Use the identical harness before and after a change.
 
 ## Boundaries
 

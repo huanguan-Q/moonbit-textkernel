@@ -16,6 +16,14 @@
 //   * the segment written for `src[i]` is exactly the escape of `src[i]`, and
 //   * the cursor advances by exactly that segment's width.
 //
+// The surrogate rule is part of the functionality. A character outside the BMP
+// is two code units, a leading and a trailing surrogate; both are copied as
+// they are. Only an unpaired half becomes `_`. The first version of this
+// kernel replaced every surrogate unit, satisfied its contracts, and turned an
+// emoji into `__`: the contracts said so. `paired_at` in `spec.mbtp` is the
+// corrected rule, and `conform.mbt` pins the shipped `String` escapers to it
+// over a corpus that contains well-formed pairs.
+//
 // These two assertions are what stops the contracts from being satisfied by a
 // degenerate writer. Before they existed, an implementation that wrote `_` for
 // every unit satisfied all five `/attr` ensures (no angle bracket, no quote, no
@@ -42,7 +50,31 @@
 // writer that emits the wrong bytes.
 
 ///|
-/// Escape `&`, `<`, `>` and lone surrogates, mirroring `@lib.escape_html`.
+/// Is `src[i]` half of a well-formed surrogate pair?
+///
+/// Proved: the result is true exactly when `paired_at(src, i)` holds.
+pub fn paired_codes(
+  src : FixedArray[Int32],
+  i : Int32,
+) -> Bool where {
+  proof_require: 0 <= i,
+  proof_require: i < src.length(),
+  proof_ensure: result => (result == true) == paired_at(src, i),
+} {
+  if SURROGATE_LO <= src[i] && src[i] <= HIGH_SURR_HI {
+    i + 1 < src.length() &&
+    LOW_SURR_LO <= src[i + 1] &&
+    src[i + 1] <= SURROGATE_HI
+  } else if LOW_SURR_LO <= src[i] && src[i] <= SURROGATE_HI {
+    1 <= i && SURROGATE_LO <= src[i - 1] && src[i - 1] <= HIGH_SURR_HI
+  } else {
+    false
+  }
+}
+
+///|
+/// Escape `&`, `<`, `>` and unpaired surrogate halves, mirroring
+/// `@lib.escape_html`. A well-formed pair is copied whole.
 ///
 /// `dst` must hold at least `5 * src.length()` code units because `&amp;` is the
 /// widest replacement.
@@ -84,15 +116,17 @@ pub fn escape_html_codes(
       dst[w + 2] = CH_LOWER_T
       dst[w + 3] = CH_SEMI
       w = w + 4
-    } else if SURROGATE_LO <= c && c <= SURROGATE_HI {
+    } else if SURROGATE_LO <= c && c <= SURROGATE_HI && !paired_codes(src, i) {
+      // An unpaired surrogate half has no character to copy and becomes `_`.
       dst[w] = CH_UNDERSCORE
       w = w + 1
     } else {
+      // Everything else, a well-formed pair included, is copied as it is.
       dst[w] = c
       w = w + 1
     }
-    proof_assert html_at(dst, pos, c)
-    proof_assert w == pos + html_width(c)
+    proof_assert html_at(dst, pos, src, i)
+    proof_assert w == pos + html_width_at(src, i)
     continue i + 1
   } nobreak {
     w
@@ -112,8 +146,8 @@ pub fn escape_html_codes(
 }
 
 ///|
-/// Escape `&`, `<`, `>`, `"`, `'` and lone surrogates, mirroring
-/// `@lib.escape_attr`.
+/// Escape `&`, `<`, `>`, `"`, `'` and unpaired surrogate halves, mirroring
+/// `@lib.escape_attr`. A well-formed pair is copied whole.
 ///
 /// `dst` must hold at least `6 * src.length()` code units because `&quot;` is the
 /// widest replacement.
@@ -171,15 +205,17 @@ pub fn escape_attr_codes(
       dst[w + 3] = 57
       dst[w + 4] = CH_SEMI
       w = w + 5
-    } else if SURROGATE_LO <= c && c <= SURROGATE_HI {
+    } else if SURROGATE_LO <= c && c <= SURROGATE_HI && !paired_codes(src, i) {
+      // An unpaired surrogate half has no character to copy and becomes `_`.
       dst[w] = CH_UNDERSCORE
       w = w + 1
     } else {
+      // Everything else, a well-formed pair included, is copied as it is.
       dst[w] = c
       w = w + 1
     }
-    proof_assert attr_at(dst, pos, c)
-    proof_assert w == pos + attr_width(c)
+    proof_assert attr_at(dst, pos, src, i)
+    proof_assert w == pos + attr_width_at(src, i)
     continue i + 1
   } nobreak {
     w

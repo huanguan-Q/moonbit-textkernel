@@ -7,11 +7,19 @@
 
 ///|
 /// Errors produced by the validated API variants.
+///
+/// The `*_result` functions return `InputTooLarge` for an input outside the
+/// shipping domain and `InvariantViolation` when a shipped result fails its
+/// own runtime check. `normalize_asset_url*` also returns `InvalidConfig` when
+/// the `AssetConfig` holds a default parameter that cannot be appended.
+/// `InvalidInput` and `PerformanceWarning` are kept for compatibility: only
+/// `validate_string_input` produces them.
 pub enum CoreError {
   InvalidInput(String)
   PerformanceWarning(String)
   InputTooLarge(String)
   InvariantViolation(String)
+  InvalidConfig(String)
 }
 
 ///|
@@ -22,6 +30,7 @@ pub fn error_to_string(error : CoreError) -> String {
     PerformanceWarning(msg) => "Performance Warning: " + msg
     InputTooLarge(msg) => "Input Too Large: " + msg
     InvariantViolation(msg) => "Invariant Violation: " + msg
+    InvalidConfig(msg) => "Invalid Config: " + msg
   }
 }
 
@@ -69,6 +78,11 @@ pub fn apply_failure_policy(
 /// `function_name` is carried into the error message so a caller that validates
 /// several fields can tell which one failed. The `Unit` payload keeps the return
 /// type usable as a guard: `validate_string_input(...)?` then continue.
+///
+/// This is a general helper for callers that want a field-length rule of their
+/// own. The library's `*_result` functions no longer go through it: an empty
+/// string is a valid input for all of them, and the only bound they enforce is
+/// `MAX_SHIPPING_CODE_UNITS`, reported as `InputTooLarge`.
 pub fn validate_string_input(
   function_name : String,
   input : String,

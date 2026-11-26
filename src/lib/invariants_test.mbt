@@ -13,11 +13,12 @@
 
 ///|
 /// Characters that matter to one of the three invariants: the five entities, the
-/// nine filename characters, a quote, a CJK char and a surrogate pair.
+/// nine filename characters, a quote, a CJK char, a surrogate pair, a dot and a
+/// control character.
 fn mirror_alphabet() -> Array[String] {
   [
     "&", "<", ">", "\"", "'", ";", "#", "3", "9", "/", "\\", ":", "*", "?", "|",
-    "文", "😀", "a", " ",
+    "文", "😀", "a", " ", ".", "\u{1F}",
   ]
 }
 
@@ -89,7 +90,15 @@ test "[invariants] mirror - the predicates are not vacuous" {
   assert_false(@lib.filename_is_sanitized("a/b"))
   assert_false(@lib.filename_is_sanitized("a:b"))
   assert_false(@lib.filename_is_sanitized(""))
+  // ... control characters, directory references, a trailing dot or space,
+  // and Windows device names.
+  assert_false(@lib.filename_is_sanitized("a\u{0}b"))
+  assert_false(@lib.filename_is_sanitized(".."))
+  assert_false(@lib.filename_is_sanitized("report."))
+  assert_false(@lib.filename_is_sanitized("report "))
+  assert_false(@lib.filename_is_sanitized("NUL.txt"))
   assert_true(@lib.filename_is_sanitized("普通文件名-01.png"))
+  assert_true(@lib.filename_is_sanitized("A🙂B"))
   // Accepted entities are exactly the five emitted ones.
   for e in ["&amp;", "&lt;", "&gt;", "&quot;", "&#39;"] {
     assert_true(@lib.html_is_escaped(e))

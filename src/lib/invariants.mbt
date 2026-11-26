@@ -3,9 +3,9 @@
 // Why these exist
 // ---------------
 // The safety properties of the escapers are proved for the code-unit kernels in
-// `src/coreproof` (`no_markup_prefix`, `no_quote_prefix`, `entities_ok_prefix`,
+// `src/proof` (`no_markup_prefix`, `no_quote_prefix`, `entities_ok_prefix`,
 // `sanitized_prefix`). Those kernels are *not* on the shipping path: the
-// functions below are what the extension actually calls, and they are separate
+// functions below are what the public API actually calls, and they are separate
 // String-level implementations whose only tie to the kernels is the corpus
 // equality in `conform.mbt`.
 //
@@ -22,16 +22,16 @@
 //
 // A note on false positives: these predicates are deliberately permissive about
 // everything the escapers preserve (quotes in text, non-ASCII, digits). They
-// only reject what the property forbids. `escape_invariants_test.mbt` checks
+// only reject what the property forbids. `invariants_test.mbt` checks
 // them against the real escapers over an exhaustive alphabet, because a
 // too-strict predicate here would break valid input rather than catch a bug.
 
 ///|
 /// Largest input, in UTF-16 code units, that the **proof model** covers.
 ///
-/// This is the shipping-side copy of `coreproof::MAX_CODE_UNITS`. The two are
+/// This is the shipping-side copy of `MAX_CODE_UNITS` in `src/proof/codes.mbt`. The two are
 /// kept identical by a compile-time reference on the proof side (see
-/// `src/coreproof/codes.mbt`), so the number exists once in the source and the
+/// `src/proof/codes.mbt`), so the number exists once in the source and the
 /// kernels' `proof_require: length <= MAX_CODE_UNITS` keeps meaning what the
 /// runtime checks below enforce.
 ///
@@ -47,7 +47,7 @@ pub const MAX_INPUT_CODE_UNITS : Int32 = 100000000
 /// Deliberately smaller than `MAX_INPUT_CODE_UNITS` — that one answers "can the
 /// arithmetic overflow?", this one answers "how much may one call allocate on
 /// the host heap?". They are different questions, so they get different numbers,
-/// with a compile-time test in `coreproof` asserting `shipping <= model` (the
+/// with a compile-time test in `src/proof` asserting `shipping <= model` (the
 /// theorem then covers everything this layer lets through).
 ///
 /// Why 8,000,000 — measured, not guessed:
@@ -78,6 +78,10 @@ pub const MAX_SHIPPING_CODE_UNITS : Int32 = 8000000
 /// This is the runtime form of the kernels' `proof_require` on length: at the
 /// shipping layer there is no `dst` buffer to size, so the only precondition
 /// with an analogue here is the domain cap. `what` only shapes the message.
+///
+/// Only `str_contains` still uses it. Every other entry point goes through the
+/// checked form and hands the error to a `FailurePolicy`, so it can honour the
+/// same bound without aborting.
 pub fn check_code_unit_count(
   n : Int32,
   what : String,
@@ -155,22 +159,36 @@ pub fn attr_is_escaped(s : String) -> Bool {
 ///|
 /// Could `s` be written as a filename without changing meaning?
 ///
-/// Rejects the nine characters `sanitize_filename` replaces, and requires a
-/// non-empty result (the sanitiser substitutes `file` for empty input, so an
-/// empty output can only come from a bug). The counterpart of
-/// `sanitized_prefix`.
+/// The String-level counterpart of `sanitized_prefix`, plus the platform rules
+/// `finalize_filename` applies. It rejects every character `sanitize_filename`
+/// replaces, an unpaired surrogate half, the empty string, a name made of dots
+/// only (`.`, `..` and `...` are directory references, not files), a trailing
+/// dot or space, and a Windows device name.
 pub fn filename_is_sanitized(s : String) -> Bool {
-  if s.length() == 0 {
+  let n = s.length()
+  if n == 0 {
     return false
   }
   let mut i = 0
-  while i < s.length() {
-    if is_invalid_filename_char(s[i]) {
+  while i < n {
+    let code = s[i]
+    if is_invalid_filename_char(code) || is_control_filename_char(code) {
+      return false
+    }
+    // A well-formed pair is one character and takes two code units.
+    if code.is_leading_surrogate() {
+      if i + 1 >= n || !s[i + 1].is_trailing_surrogate() {
+        return false
+      }
+      i = i + 2
+      continue
+    }
+    if code.is_trailing_surrogate() {
       return false
     }
     i = i + 1
   }
-  true
+  !is_all_dots(s) && !has_trailing_dot_or_space(s) && !is_windows_device_name(s)
 }
 
 ///|

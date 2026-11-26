@@ -42,13 +42,28 @@ assert.equal(
   `<article data-author="O&#39;Neil &quot;admin&quot;"><p>&lt;script&gt;alert("x")&lt;/script&gt; &amp; hello</p></article>`,
 );
 
-// The joined ABI works on UTF-16 code units and maps lone surrogates to '_',
-// so non-BMP characters must go through the single-value exports instead.
-const rendered = renderCommentBatch(["<b>a</b>", "x & y", "中文"]);
-assert.deepEqual(rendered, ["&lt;b&gt;a&lt;/b&gt;", "x &amp; y", "中文"]);
+// The joined ABI goes through the same escapers as the single-value exports,
+// so a character outside the BMP survives either way. It does slice by
+// UTF-16 code unit, so the separator must not split a character: use one the
+// content cannot contain.
+const rendered = renderCommentBatch(["<b>a</b>", "x & y", "中文", "好😀 <i>"]);
+assert.deepEqual(rendered, ["&lt;b&gt;a&lt;/b&gt;", "x &amp; y", "中文", "好😀 &lt;i&gt;"]);
 
+// Path separators go, and so does every other way of naming something other
+// than a file: `..` is a directory, a trailing dot vanishes on Windows, and
+// `nul.txt` is a device.
 const uploadPath = prepareUpload("../../etc/passwd?.png");
 assert.equal(uploadPath, "uploads/.._.._etc_passwd_.png");
+assert.equal(prepareUpload(".."), "uploads/file");
+assert.equal(prepareUpload("report."), "uploads/report_");
+assert.equal(prepareUpload("nul.txt"), "uploads/nul_.txt");
+assert.equal(prepareUpload("报告😀.pdf"), "uploads/报告😀.pdf");
+
+// The allow-list applies to the URL's own host. A CDN address that is only
+// part of somebody else's URL is left alone and gets the strict policy.
+const lookAlike = assetUrl("https://cdn.example.com.evil.com/a.png");
+assert.equal(lookAlike.url, "https://cdn.example.com.evil.com/a.png");
+assert.equal(lookAlike.referrerPolicy, "no-referrer");
 
 const asset = assetUrl("http://cdn.example.com/a.png");
 assert.equal(asset.url, "https://cdn.example.com/a.png?fmt=png&v=1");
