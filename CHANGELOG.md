@@ -7,11 +7,17 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 See [docs/API-STABILITY.md](docs/API-STABILITY.md) for what counts as a public
 API change.
 
-## [Unreleased]
+## [0.2.0] - 2026-11-26
 
-Several fixes below change what a stable function returns for some inputs —
-text with a character outside the BMP, `..`, a look-alike host, a long article.
-Under `docs/API-STABILITY.md` a change in output is not a patch release.
+This is a minor release because several fixes change what a stable function
+returns for some inputs: text with a character outside the BMP, `..`, a URL on
+a look-alike host, a long article, a default parameter that cannot be
+appended. Under `docs/API-STABILITY.md` such a fix is not released as a patch.
+The function names and their signatures are unchanged; the 13 WASM exports are
+unchanged. A caller that upgrades needs to look at three things: a `match` over
+`CoreError` needs an `InvalidConfig` arm, a script that tests the CLI's exit
+status now sees `2` on failure, and code that relied on the old output above
+changes behaviour.
 
 ### Fixed
 
@@ -55,10 +61,8 @@ Under `docs/API-STABILITY.md` a change in output is not a patch release.
 - `batch_process_custom` no longer drops the whole list when the configured
   chunk size is 2,147,483,644 or more: `(total + size - 1)` overflowed. The
   chunk size now stays inside the domain its arithmetic was proved on.
-  (Committed in 60afa2c.)
 - `join_joined`, and with it the `*_joined` WASM exports, is linear on the
   native backend. 16,000 items took 2.2 s; they take 31 ms now.
-  (Committed in 45b8aec.)
 
 ### Changed
 
@@ -90,6 +94,11 @@ Under `docs/API-STABILITY.md` a change in output is not a patch release.
 
 ### Added
 
+- `CoreError::InvalidConfig(String)`, returned by `normalize_asset_url*_result`
+  for a default parameter that cannot be appended; `error_to_string` renders it
+  as `Invalid Config: <piece>`.
+- `CLI_USAGE_EXIT` (`2`), the process exit status of both CLI entry points
+  when they print an `error` line.
 - Proof kernels for the scheme test, the end of the authority, the start of the
   host and the host rule (`src/proof/url.mbt`); the dot-only rule and the
   surrogate pair in the sanitizer (`src/proof/sanitize.mbt`).

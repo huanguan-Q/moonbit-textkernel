@@ -25,9 +25,9 @@ resource limiting: see Boundaries below.
 ## Run the Wasm / moonx command
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.1.4 -- --help
-moonx huanguan-Q/textkernel/src/main@0.1.4 -- escape-html '<script>x</script>'
-moonx huanguan-Q/textkernel/src/main@0.1.4 -- normalize-asset-url \
+moonx huanguan-Q/textkernel/src/main@0.2.0 -- --help
+moonx huanguan-Q/textkernel/src/main@0.2.0 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.2.0 -- normalize-asset-url \
   --hosts cdn.example.com --params fmt=png,v=1 \
   'http://cdn.example.com/a.png'
 ```
@@ -44,7 +44,7 @@ both keeps the historical RFC 2606 example configuration.
 behave the same. When a shell command runs it, test the status:
 
 ```bash
-out=$(moonx huanguan-Q/textkernel/src/main@0.1.4 -- normalize-asset-url \
+out=$(moonx huanguan-Q/textkernel/src/main@0.2.0 -- normalize-asset-url \
   --hosts cdn.example.com --params 'fmt=png,x#y' https://cdn.example.com/a.png)
 # exit status 2; out is {"command":"normalize-asset-url","error":"Invalid Config: x#y"}
 ```

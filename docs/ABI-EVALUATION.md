@@ -5,8 +5,8 @@
 `wasm/textkernel.wasm` is a WASM-GC module built from `src/main` with
 `use-js-builtin-string`. It exposes 13 business exports plus `_start` and uses
 JS string builtins; a host must provide `wasm:js-string`. The current artefact
-is 27,095 bytes (23,574 before the URL parser and the filename rules were
-added, 9,550 when the shim only re-exported library functions).
+is 27,906 bytes (27,095 before the CLI learned to exit with a status, 23,574
+before the URL parser and the filename rules were added, 9,550 when the shim only re-exported library functions).
 
 A separate linear-memory build is possible:
 

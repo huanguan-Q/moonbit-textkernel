@@ -65,9 +65,9 @@ No compatibility promise:
   patch. It is released as a minor version, with a `CHANGELOG.md` entry that
   names the inputs it affects. That is the one case where "patch" above does
   not apply: keeping a wrong answer to save a version number is the worse
-  break. The fixes in the `[Unreleased]` section do this for text with a
-  character outside the BMP, for `..`, for URLs on a look-alike host, and for
-  a default parameter that cannot be appended.
+  break. The fixes in 0.2.0 do this for text with a character outside the BMP,
+  for `..`, for URLs on a look-alike host, and for a default parameter that
+  cannot be appended.
 
 ## Configuration compatibility
 
