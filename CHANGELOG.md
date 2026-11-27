@@ -28,15 +28,35 @@ the current requirement of moonc 1.0.0-rc1 or newer.
 
 ### Changed
 
-- The repository is verified on **moonc v1.0.0-rc1** (`moon 0.1.20261126`):
-  215 tests on each of the four backends and every proof goal discharged under
-  the 10x gate (488 goals). The README states this requirement.
+- The repository is verified on **moonc v1.0.0-rc1+3c0520448**
+  (`moon 0.1.20261126`, `ccd306a`): 215 tests on each of the four
+  backends and every proof goal discharged under the 10x gate (488 goals). The
+  README states this requirement.
 - `docs/TOOLCHAIN-PIN.md` records that the dated CLI binaries remain
   unavailable, so the compatibility pin has no installable value and the two
   CI tracks currently run the same toolchain.
 - `wasm/textkernel.wasm` is rebuilt with moonc 1.0.0-rc1: 27,908 bytes, the
-  same 13 exports plus `_start`, same behaviour. The 2-byte difference from the
-  0.2.0 artefact (27,906) is compiler output, not a source change.
+  same 13 exports plus `_start`, same behaviour. The difference from the 0.2.0
+  artefact (27,906 bytes) is compiler output plus the embedded version string,
+  not a source change.
+
+### Build toolchain
+
+Recorded because the dated CLI binaries are no longer downloadable, so the
+compiler that produced a published artefact cannot be reinstalled from its
+version number alone. The `+hash` suffix is the compiler's own commit.
+
+| Release | `moonc` | `moon` | Published `wasm/textkernel.wasm` |
+|---|---|---|---|
+| 0.2.1 | `v1.0.0-rc1+3c0520448` | `0.1.20261126` (`ccd306a`) | 27,908 bytes, SHA-256 `afde01cb…` |
+| 0.2.0 | `v0.10.22+124d61d05` | `0.1.20261119` (`738607b`) | 27,906 bytes, SHA-256 `61f2c860…` |
+
+Rebuilding 0.2.1 from the release commit with that compiler reproduces the
+artefact byte for byte. The version in `moon.mod` is embedded in the module:
+the same sources built as `0.2.0` and as `0.2.1` differ in content, so the
+artefact identifies both the compiler and the version it was built as. The
+toolchains of the 0.1.x releases are not recorded here because they could not
+be established after the fact.
 - The test count in the package summary and in `docs/PROOF-REPORT.md` is
   updated to 215.
 

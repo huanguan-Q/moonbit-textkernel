@@ -306,6 +306,14 @@ explicit policy choice instead of the only behaviour available.
   can only arrive from a host that passes ill-formed UTF-16; the kernels are
   driven on raw code units, and `examples/wasm-node/demo.mjs` sends one through
   the WASM exports from JS.
+- **An unpaired half becomes `_`, not U+FFFD.** It has no character to copy, so
+  it has to become something. `_` is the one replacement the project already
+  uses — `sanitize_filename` writes it for every reserved character — and both
+  are a single UTF-16 code unit, so the escapers' `5n` / `6n` output bounds
+  hold unchanged. The cost is that a literal `_` and a replaced half are
+  indistinguishable in the output; U+FFFD would make them distinguishable and
+  is a one-code-unit change, but it changes what a stable function returns and
+  is therefore a minor release, not a patch.
 - **No verified third-party adoption yet.** There are no downstream dependents
   outside this repository's own examples. `ssr-middleware.mjs` shows the shape
   a consumer would write; it is not evidence of adoption.
@@ -368,8 +376,16 @@ guard, not a promise: absolute throughput depends on the backend and host.
 
 This project follows Semantic Versioning 2.0.0. Patch releases are
 output-preserving bug fixes; minor releases add APIs with compatibility
-defaults; major releases may remove or change stable names. The stable surface
-and deprecation path are listed in `docs/API-STABILITY.md`.
+defaults, and a fix that changes what a stable function returns for some
+input is released as a minor, never as a patch; major releases may remove or
+change stable names. The stable surface and deprecation path are listed in
+`docs/API-STABILITY.md`.
+
+Every published version has a tag `vX.Y.Z` on the commit whose `moon.mod`
+carries that version, so a release can be checked out with
+`git checkout v0.2.1`. The tags were added on 2026-11-28, after the releases;
+they point at the release commits and their own timestamps are not the release
+dates. `CHANGELOG.md` records the compiler each recent release was built with.
 
 ## Provenance & License
 
