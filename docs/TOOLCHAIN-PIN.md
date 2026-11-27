@@ -27,6 +27,28 @@ fact:
 - If a configured pin is unavailable, the `current` track fails loudly instead
   of silently claiming to have tested it.
 
+## Status 2026-11-27
+
+Re-verified 2026-11-27: every dated binary is still unavailable —
+`https://cli.moonbitlang.com/binaries/<date>/...` returns HTTP 403 for
+`0.1.20261119` and `0.1.20261117` on both `linux-x86_64` and
+`darwin-aarch64`, while `latest` and `nightly` return 200. Two
+consequences:
+
+- `MOONBIT_PINNED_VERSION` still has no installable value, so `current`
+  runs the same toolchain as `latest`. The two tracks are independent CI
+  jobs but not version-diverse: a green pair currently proves one
+  toolchain, not two.
+- The toolchain that built and published `0.2.0` (`0.1.20261119`, moonc
+  `v0.10.22+124d61d05`) can no longer be installed from the official
+  source. Its build is reproducible only while a copy of that exact
+  toolchain is retained offline; treat the `latest` track as the only live
+  compatibility signal — a green run means "today's `latest` compiles this
+  commit", not "the release toolchain does".
+
+When a dated release becomes downloadable again, set the variable and
+update this section in the same commit.
+
 ## What is recorded
 
 The job prints `moon version --all` in both tracks. Read that line, not the
