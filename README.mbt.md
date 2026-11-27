@@ -2,7 +2,8 @@
 
 A formally verified MoonBit kernel for HTML escaping, filename sanitisation,
 URL rewriting and joined-list batch operations. Zero dependencies, four
-backends, 193 tests and every proof goal discharged under the CI gate.
+backends, 215 tests and every proof goal discharged under the CI gate.
+Requires moonc 1.0.0-rc1 or newer.
 
 ## Usage
 

@@ -11,10 +11,10 @@ suggest.
 | `moon prove` with stock solver limits (mathematical integers) | 207 goals proved, 3 timeout, 0/1 proof-enabled package |
 | `node scripts/prove_gate.mjs` (CI, 32-bit machine integers, 10x limits) | every goal proved, 1/1 proof-enabled package (355 or 488 goals across five clean runs) |
 | Backends tested | wasm, wasm-gc, js, native |
-| Tests at last full run | 193/193 on each backend |
+| Tests at last full run | 215/215 on each backend |
 
-Measured 2026-11-25 on `moon 0.1.20261119`, Why3 1.7.2, Z3 4.15.4 and
-Alt-Ergo 2.4.3.
+Measured 2026-11-27 on moonc v1.0.0-rc1 (`moon 0.1.20261126`), Why3 1.7.2,
+Z3 4.15.4 and Alt-Ergo 2.4.3.
 
 **The gate is the verdict.** The stock run and the gate prove different
 theorems under different budgets: the stock run uses the mathematical-integer
