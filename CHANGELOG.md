@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 See [docs/API-STABILITY.md](docs/API-STABILITY.md) for what counts as a public
 API change.
 
+## [0.2.1] - 2026-11-27
+
+This is a patch release. No public name, signature, command or output changes:
+the library and proof sources are byte-for-byte those of 0.2.0. What changes is
+the evidence that ships with them — the tests, the CI gate and the recorded
+toolchain — and the published artefact is now built with a compiler that meets
+the current requirement of moonc 1.0.0-rc1 or newer.
+
+### Added
+
+- Tests for the CLI surface (`src/lib/cli_test.mbt`): CSV splitting, config
+  merging, every command of `run_cli` including the two failures that produce
+  exit status `2`, and the JSON-lines shapes.
+- Tests for the WASM export shim (`src/main/exports_wbtest.mbt`): all 13 exports
+  agree with the library API, the `str_contains` boolean mapping, and the
+  joined-string round trip.
+- A CI step that pins the process-level exit contract advertised in 0.2.0: an
+  `error` line exits with `2`, `--help` with `0`.
+
+### Changed
+
+- The repository is verified on **moonc v1.0.0-rc1** (`moon 0.1.20261126`):
+  215 tests on each of the four backends and every proof goal discharged under
+  the 10x gate (488 goals). The README states this requirement.
+- `docs/TOOLCHAIN-PIN.md` records that the dated CLI binaries remain
+  unavailable, so the compatibility pin has no installable value and the two
+  CI tracks currently run the same toolchain.
+- `wasm/textkernel.wasm` is rebuilt with moonc 1.0.0-rc1: 27,908 bytes, the
+  same 13 exports plus `_start`, same behaviour. The 2-byte difference from the
+  0.2.0 artefact (27,906) is compiler output, not a source change.
+- The test count in the package summary and in `docs/PROOF-REPORT.md` is
+  updated to 215.
+
 ## [0.2.0] - 2026-11-26
 
 This is a minor release because several fixes change what a stable function

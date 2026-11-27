@@ -5,7 +5,7 @@
 `wasm/textkernel.wasm` is a WASM-GC module built from `src/main` with
 `use-js-builtin-string`. It exposes 13 business exports plus `_start` and uses
 JS string builtins; a host must provide `wasm:js-string`. The current artefact
-is 27,906 bytes (27,095 before the CLI learned to exit with a status, 23,574
+is 27,908 bytes (27,906 when built with moonc v0.10.22, 27,095 before the CLI learned to exit with a status, 23,574
 before the URL parser and the filename rules were added, 9,550 when the shim only re-exported library functions).
 
 A separate linear-memory build is possible:
@@ -14,7 +14,7 @@ A separate linear-memory build is possible:
 moon build --target wasm --release
 ```
 
-It produces `_build/wasm/release/build/src/main/main.wasm` (43,306 bytes) with
+It produces `_build/wasm/release/build/src/main/main.wasm` (44,684 bytes) with
 exports `memory` and `_start`, and imports `wasi_snapshot_preview1.fd_write`
 plus the MoonBit `__moonbit_fs_unstable` argv helpers. It does **not** currently
 export the 13 business functions: the `link.exports` declaration in
