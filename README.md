@@ -63,7 +63,8 @@ Requires **moonc 1.0.0-rc1 or newer** (`moon 0.1.20261126`). Install it with
 the official installer, which provides the latest release:
 
 ```bash
-curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+curl -fsSL https://cli.moonbitlang.com/install/unix.sh -o /tmp/moon-install.sh
+bash /tmp/moon-install.sh
 moon version --all    # moonc v1.0.0-rc1 or newer
 ```
 
