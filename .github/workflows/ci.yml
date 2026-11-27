@@ -72,6 +72,26 @@ jobs:
       - name: CLI entry point
         run: moon run src/cli --target native -- --help
 
+      - name: CLI exit contract (error exits 2, help exits 0)
+        # CHANGELOG 0.2.0 advertises this to callers: an error line exits 2,
+        # an output line exits 0. The decision is `@env.exit` inside the
+        # entry points, which moon test functions cannot reach, so the shell
+        # pins the process-level contract here.
+        run: |
+          moon run src/cli --target native -- --help </dev/null >/dev/null
+          set +e
+          moon run src/cli --target native -- nosuch-command </dev/null >/dev/null 2>&1
+          rc=$?
+          set -e
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::unknown command exited 0, expected 2"
+            exit 1
+          fi
+          if [ "$rc" -ne 2 ]; then
+            echo "::error::unknown command exited $rc, expected 2"
+            exit 1
+          fi
+
       - name: Validate package contents
         run: moon package --list
 
