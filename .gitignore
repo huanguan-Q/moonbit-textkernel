@@ -12,8 +12,6 @@ bisect.coverage
 .DS_Store
 .idea/
 .vscode/
-.workbuddy/
-.pre-commit-config.yaml
 
 # Local dependency caches
 node_modules/
@@ -45,7 +43,6 @@ venv/
 *.safetensors
 *.onnx
 .ipynb_checkpoints/
-.leak-guard/
 
 # Images / media (may carry EXIF, faces or secrets in screenshots)
 *.png
