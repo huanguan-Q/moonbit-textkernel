@@ -8,14 +8,15 @@
 [![skills](https://img.shields.io/badge/mooncakes%20skills-0.2.1-purple)](https://mooncakes.io/skills/huanguan-Q/textkernel@0.2.1)
 [![license](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-**A small, formally verified MoonBit kernel for text that crosses a trust boundary.**
+**A small MoonBit kernel for text that crosses a trust boundary.**
 
 When a program takes a string from one system and puts it into another — into
 HTML, into a filename, into a URL, into a batch API — four things can go wrong:
 markup can be injected, a filename can escape its directory, a URL can be
 rewritten incorrectly, and a batch loop can drop an item. `textkernel` is
 the set of routines for those four jobs, with the safety properties of their
-code-unit kernels discharged by `moon prove` rather than by inspection.
+code-unit kernels discharged by `moon prove` rather than by inspection, and
+the shipped `String` layer checking its own output invariants at runtime.
 
 One rule runs through all of them: **well-formed text passes through.** A
 character outside the BMP — an emoji, a CJK Extension B ideograph — is one

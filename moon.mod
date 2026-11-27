@@ -4,7 +4,7 @@ version = "0.2.1"
 
 readme = "README.mbt.md"
 
-description = "A formally verified MoonBit kernel for HTML escaping, filename sanitisation, URL rewriting and joined-list batch operations."
+description = "A small MoonBit kernel for text that crosses a trust boundary: HTML escaping, filename sanitisation, URL rewriting and joined-list batch operations, with code-unit kernels discharged by moon prove."
 
 license = "MIT"
 
