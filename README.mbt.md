@@ -51,8 +51,9 @@ Run `moon test --target all` and `node scripts/prove_gate.mjs` (10x solver
 limits in CI, 32-bit machine-integer model). The gate is the verdict; the
 number of goals it reports, 355 or 488, depends on how they are split. A bare `moon prove` at the stock limits discharges 207 goals under the
 mathematical-integer model and reports 3 timeouts in the escape kernels; its
-outcome depends on solver timing. Re-verified 2026-11-25 on
-`moon 0.1.20261119`: 193/193 tests pass on all four backends. The proved
+outcome depends on solver timing. Re-verified 2026-11-27 on
+**moonc v1.0.0-rc1 (`moon 0.1.20261126`)**: 215/215 tests pass on all four
+backends and the 10x gate proves 488 goals. The proved
 kernels live in
 `src/proof` over UTF-16 code-unit arrays; `src/proof/conform.mbt` pins them to
 the shipped `String` API over an enumerated corpus. `src/lib` is not in the

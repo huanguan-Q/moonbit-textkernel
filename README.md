@@ -22,8 +22,11 @@ character outside the BMP — an emoji, a CJK Extension B ideograph — is one
 character and is copied whole. Only an unpaired surrogate half is replaced.
 
 ```
-huanguan-Q/textkernel    193 tests × 4 backends    every proof goal discharged    13 WASM API exports (+ `_start`)    zero deps
+huanguan-Q/textkernel    215 tests × 4 backends    every proof goal discharged    13 WASM API exports (+ `_start`)    zero deps
 ```
+
+Built and verified with **moonc v1.0.0-rc1** (`moon 0.1.20261126`); see
+[Reproduce](#reproduce) for the toolchain and the exact commands.
 
 ## What is in the box
 
@@ -56,10 +59,20 @@ quietly emitting markup the caller believes is escaped.
 
 ## Reproduce
 
+Requires **moonc 1.0.0-rc1 or newer** (`moon 0.1.20261126`). Install it with
+the official installer, which provides the latest release:
+
+```bash
+curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+moon version --all    # moonc v1.0.0-rc1 or newer
+```
+
+Then, from the repository root:
+
 ```bash
 moon fmt --check
 moon check --target all --deny-warn       # wasm / wasm-gc / js / native, zero warnings
-moon test --target all                    # 193/193 on each backend
+moon test --target all                    # 215/215 on each backend
 moon prove                               # 207 goals at the stock solver limits; 3 report a timeout
 node scripts/prove_gate.mjs              # every goal; 10x solver limits in CI, machine-int model
 moon run src/demo --target native        # runnable example
@@ -81,10 +94,20 @@ is `1 of 1 packages proved` with nothing left unproved. A stock run that reports
 not a regression by itself: its outcome depends on solver timing, and the same
 kernels had a goal at the stock limits before that z3 alone could not close.
 
-Toolchain used to produce the numbers above: `moon 0.1.20261119`, Why3 1.7.2,
-Z3 4.15.4, Alt-Ergo 2.4.3, re-verified 2026-11-25 after the URL and filename
-rules were added. The proof verdicts depend on the VC generator, so pin the
-toolchain when reproducing.
+Toolchain for the numbers above: **moonc v1.0.0-rc1 (`moon 0.1.20261126`)**,
+Why3 1.7.2, Z3 4.15.4, Alt-Ergo 2.4.3, re-verified 2026-11-27 on a clean
+checkout: format and `moon check --target all --deny-warn` are clean, 215/215
+tests pass on all four backends, `node scripts/build_wasm.mjs` builds the
+artefact, all three `examples/wasm-node` scripts pass, and
+`PROVE_TIME_SCALE=10` proves 488 goals (`1 of 1 packages proved`). This is the
+same toolchain CI installs on every run. The proof verdicts depend on the VC
+generator, so pin the toolchain when reproducing.
+
+Earlier records, kept for the history of the numbers. `moon 0.1.20261119`
+(moonc v0.10.22), Why3 1.7.2, Z3 4.15.4, Alt-Ergo 2.4.3, verified 2026-11-25
+after the URL and filename rules were added: 193/193 tests, 207 goals proved
+at the stock limits with 3 timeouts. The proof verdicts depend on the VC
+generator, so pin the toolchain when reproducing.
 
 Re-verified 2026-11-19 on the local toolchain `moon 0.1.20261117 (eb64713)`:
 146/146 tests pass on all four backends, `moon prove` discharges 191 goals,
