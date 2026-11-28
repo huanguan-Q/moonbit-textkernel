@@ -8,6 +8,13 @@ Requires moonc 1.0.0-rc1 or newer.
 
 ## Usage
 
+```bash
+moon add huanguan-Q/textkernel@0.2.1
+```
+
+In the `moon.pkg` of the calling package, import `"huanguan-Q/textkernel/src/lib"`;
+`@lib` below is that package's alias.
+
 ```moonbit
 let safe = @lib.escape_html("<script>alert(1)</script>")
 let name = @lib.sanitize_filename("report/2026:Q4?.md")
@@ -15,9 +22,11 @@ let url = @lib.normalize_asset_url("http://cdn.example.com/a.png")
 let parts = @lib.split_joined("a|b|c", "|")
 ```
 
-`*_result` variants return `Result[T, CoreError]`. They accept the empty string
-and every input up to `MAX_SHIPPING_CODE_UNITS`. The shipping layer verifies
-its own output against the escape invariants before returning.
+`*_result` variants return `Result[String, CoreError]`. `CoreError` does not
+implement `Show`: match on the result and turn the error with `error_to_string`.
+They accept the empty string and every input up to `MAX_SHIPPING_CODE_UNITS`.
+The shipping layer verifies its own output against the escape invariants before
+returning.
 
 Well-formed text passes through: a character outside the BMP (an emoji, a CJK
 Extension B ideograph) is copied whole by every routine. Only an unpaired

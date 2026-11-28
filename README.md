@@ -138,6 +138,27 @@ rule.
 
 ## Use
 
+### Add it to a module
+
+```bash
+moon add huanguan-Q/textkernel@0.2.1
+```
+
+Then declare the package in the `moon.pkg` of the package that calls it.
+`src/lib` is the library; the other packages of the module (`src/cli`,
+`src/demo`, `src/main`, `src/proof`) are not for callers.
+
+```json
+import {
+  "huanguan-Q/textkernel/src/lib",
+}
+```
+
+`@lib` in the examples is the alias of that package. To exit with a status on
+an error, import `"moonbitlang/core/env"` as well and call `@env.exit`.
+
+### Call it
+
 ```moonbit
 let safe = @lib.escape_html("<script>alert(1)</script>")
 // &lt;script&gt;alert(1)&lt;/script&gt;
@@ -148,6 +169,27 @@ let name = @lib.sanitize_filename("report/2026:Q4?.md")
 let items = @lib.split_joined("a|b|c", "|")
 let out = @lib.join_joined(@lib.quick_batch_escape_htmls(items), "|")
 ```
+
+A `*_result` function returns `Result[String, CoreError]`. `CoreError` does not
+implement `Show`, so the result cannot be printed directly: match on it and turn
+the error with `error_to_string`.
+
+```moonbit
+match @lib.normalize_asset_url_result("http://cdn.example.com/a.png") {
+  Ok(url) => println(url)
+  Err(e) => {
+    println(@lib.error_to_string(e))
+    @env.exit(2)
+  }
+}
+```
+
+The call above succeeds. A default parameter that cannot be appended, such as
+one containing `#`, is refused instead: with
+`create_asset_config(["cdn.example.com"], ["fmt=png#frag"])`, the function
+`normalize_asset_url_with_config_result` returns
+`Err(InvalidConfig("fmt=png#frag"))` for the same URL, and the error branch
+above exits with `2`.
 
 See `src/demo/main.mbt` for a complete runnable example and
 `examples/wasm-node/ssr-middleware.mjs` for an SSR/UGC consumer.
