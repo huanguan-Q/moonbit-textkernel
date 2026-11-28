@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning 2.0.0](https://semver.org/spec/
 See [docs/API-STABILITY.md](docs/API-STABILITY.md) for what counts as a public
 API change.
 
+## [0.2.2] - 2026-11-28
+
+This is a patch release. No public name, signature, command or output changes:
+the sources are byte-for-byte those of 0.2.1. What changes is the
+documentation that ships with the package, and the package page on mooncakes
+renders that documentation.
+
+### Changed
+
+- The package summary no longer says "formally verified". It now states the
+  scope `docs/PROOF-REPORT.md` recommends: the code-unit kernels are proved by
+  `moon prove`, and the shipped `String` layer checks its own output
+  invariants at runtime. The earlier wording contradicted the project's own
+  guidance against calling the whole library formally verified.
+- `README.mbt.md` and `README.md` show how to add the package: the `moon add`
+  command, the `moon.pkg` declaration, which package of the module is the
+  library, and how to handle `Result[String, CoreError]`, whose error type has
+  no `Show`.
+- `README.md` records why an unpaired surrogate half becomes `_` rather than
+  U+FFFD, and that the version in `moon.mod` is embedded in the WASM module.
+- The README's versioning section states that a fix which changes what a
+  stable function returns is released as a minor, never as a patch.
+- Every published version now has a tag `vX.Y.Z`. The tags up to `v0.2.1`
+  were added after the fact; this release is the first tagged with the release.
+
+### Build toolchain
+
+| Release | `moonc` | `moon` | Published `wasm/textkernel.wasm` |
+|---|---|---|---|
+| 0.2.2 | `v1.0.0-rc1+3c0520448` | `0.1.20261126` (`ccd306a`) | 27,908 bytes, SHA-256 `016f8b77…` |
+
+The artefact is the same size as the 0.2.1 one and has the same 13 exports plus
+`_start`; the difference is the embedded version string.
+
 ## [0.2.1] - 2026-11-27
 
 This is a patch release. No public name, signature, command or output changes:
@@ -39,12 +73,15 @@ the current requirement of moonc 1.0.0-rc1 or newer.
   same 13 exports plus `_start`, same behaviour. The difference from the 0.2.0
   artefact (27,906 bytes) is compiler output plus the embedded version string,
   not a source change.
+- The test count in the package summary and in `docs/PROOF-REPORT.md` is
+  updated to 215.
 
 ### Build toolchain
 
 Recorded because the dated CLI binaries are no longer downloadable, so the
 compiler that produced a published artefact cannot be reinstalled from its
-version number alone. The `+hash` suffix is the compiler's own commit.
+version number alone. The `+hash` suffix is the compiler's own commit. Later
+releases extend the table in their own entry.
 
 | Release | `moonc` | `moon` | Published `wasm/textkernel.wasm` |
 |---|---|---|---|
@@ -57,8 +94,6 @@ the same sources built as `0.2.0` and as `0.2.1` differ in content, so the
 artefact identifies both the compiler and the version it was built as. The
 toolchains of the 0.1.x releases are not recorded here because they could not
 be established after the fact.
-- The test count in the package summary and in `docs/PROOF-REPORT.md` is
-  updated to 215.
 
 ## [0.2.0] - 2026-11-26
 

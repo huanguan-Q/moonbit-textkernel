@@ -9,7 +9,7 @@ Requires moonc 1.0.0-rc1 or newer.
 ## Usage
 
 ```bash
-moon add huanguan-Q/textkernel@0.2.1
+moon add huanguan-Q/textkernel@0.2.2
 ```
 
 In the `moon.pkg` of the calling package, import `"huanguan-Q/textkernel/src/lib"`;
@@ -52,7 +52,7 @@ allow-list and default query params without forking. The no-suffix functions
 keep the historical defaults. The same operations are available as a CLI:
 
 ```bash
-moonx huanguan-Q/textkernel/src/main@0.2.1 -- escape-html '<script>x</script>'
+moonx huanguan-Q/textkernel/src/main@0.2.2 -- escape-html '<script>x</script>'
 moon run src/cli --target native -- sanitize-filename --input 'a/b:c?.png'
 ```
 
